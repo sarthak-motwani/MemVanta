@@ -79,19 +79,20 @@ jobs:
           retention-days: 30
 
   stories15m-ab:
-    name: Stories15M bounded diagnostic A/B
+    name: Stories15M repeated A/B benchmark
     needs: trained-model-smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
 
     env:
-      REPS: 1
-      PROMPT: 16
-      GEN: 8
-      BATCH: 8
+      REPS: 5
+      WARMUP: 1
+      PROMPT: 64
+      GEN: 64
+      BATCH: 32
       KV: f16
-      MEMVANTA_TIMEOUT: 600
-      LLAMA_TIMEOUT: 300
+      MEMVANTA_TIMEOUT: 1800
+      LLAMA_TIMEOUT: 900
       OUT: v072_stories15m_ab
       LLAMA_CPP_REF: master
 
@@ -144,12 +145,12 @@ jobs:
           cmake --build llama.cpp/build --target llama-bench llama-cli -j "$(nproc)"
           ccache --show-stats
 
-      - name: Run bounded same-model diagnostic
+      - name: Run repeated same-model A/B
         env:
           LLAMA_BIN: ./llama.cpp/build/bin
         run: bash scripts/run_stories15m_ab.sh "$MODEL"
 
-      - name: Show diagnostic summary and progress
+      - name: Show benchmark summary and progress
         if: always()
         run: |
           if [ -f "$OUT/progress.txt" ]; then cat "$OUT/progress.txt"; fi
@@ -158,11 +159,11 @@ jobs:
           if [ -f "$OUT/SUMMARY.md" ]; then cat "$OUT/SUMMARY.md"; fi
           if [ -f "$OUT/summary.json" ]; then cat "$OUT/summary.json"; fi
 
-      - name: Upload raw diagnostic evidence
+      - name: Upload raw benchmark evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: memvanta-stories15m-diagnostic-ab
+          name: memvanta-stories15m-repeated-ab
           path: |
             v072_stories15m_ab/**
             llama_cpp_commit.txt
