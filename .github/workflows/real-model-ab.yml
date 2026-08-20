@@ -150,6 +150,15 @@ jobs:
           LLAMA_BIN: ./llama.cpp/build/bin
         run: bash scripts/run_stories15m_ab.sh "$MODEL"
 
+      - name: Profile MemVanta trained-model execution
+        run: |
+          timeout --signal=TERM --kill-after=15s 300 \
+            ./build-v072/memvanta_profile \
+              --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
+              --prompt 32 --gen 8 --batch 16 \
+              --csv "$OUT/layer-profile.csv" \
+            | tee "$OUT/layer-profile.txt"
+
       - name: Show benchmark summary and progress
         if: always()
         run: |
@@ -158,6 +167,7 @@ jobs:
           if [ -f "$OUT/llama-bench.exitcode.txt" ]; then echo "llama_exit=$(cat "$OUT/llama-bench.exitcode.txt")"; fi
           if [ -f "$OUT/SUMMARY.md" ]; then cat "$OUT/SUMMARY.md"; fi
           if [ -f "$OUT/summary.json" ]; then cat "$OUT/summary.json"; fi
+          if [ -f "$OUT/layer-profile.txt" ]; then cat "$OUT/layer-profile.txt"; fi
 
       - name: Upload raw benchmark evidence
         if: always()
