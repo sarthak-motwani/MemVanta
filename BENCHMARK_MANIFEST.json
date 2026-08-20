@@ -1,0 +1,114 @@
+{
+  "project": "MemVanta CPU",
+  "version": "0.5.0",
+  "date": "2026-08-20",
+  "host": {
+    "cpu": "AMD EPYC 9V74 80-Core Processor (virtualized)",
+    "cpus_available": 5,
+    "cpu_affinity": "0-4",
+    "ram_gib": 5.9,
+    "swap_gib": 0,
+    "os": "Linux x86-64",
+    "compiler": "GCC 14.2",
+    "cxx": "C++20",
+    "flags": "Release -O3 -march=native",
+    "simd": "AVX2/FMA; AVX-512 exposed"
+  },
+  "model_proxy": {
+    "kind": "SmolLM2-135M architecture-matched synthetic Llama decoder",
+    "hidden": 576,
+    "ffn": 1536,
+    "layers": 30,
+    "attention_heads": 9,
+    "kv_heads": 3,
+    "head_dim": 64,
+    "vocab": 49152,
+    "rope_theta": 100000,
+    "quantization": "Q8_0",
+    "params_million": 134.48,
+    "weight_mib": 144.28,
+    "kv_capacity_mib": 45.0,
+    "note": "architecture/parameter count matched to public SmolLM2-135M; weights are synthetic, not GGUF checkpoint weights"
+  },
+  "protocol": {
+    "independent_runs": 5,
+    "warmup_per_run": 1,
+    "threads": 5,
+    "pp_tokens": 512,
+    "tg_tokens": 128,
+    "client_input_tokens": 128,
+    "client_output_tokens": 256,
+    "metrics": [
+      "pp512 tokens/s",
+      "tg128 tokens/s",
+      "TTFT ms",
+      "output TPS excluding first token",
+      "peak RSS"
+    ],
+    "statistics": [
+      "mean",
+      "sample SD",
+      "median",
+      "p95",
+      "min",
+      "max",
+      "CV"
+    ]
+  },
+  "results": {
+    "pp512_tps": {
+      "mean": 63.0668,
+      "sd": 11.045635687682264,
+      "median": 70.1237,
+      "p95": 72.32696,
+      "min": 50.175,
+      "max": 72.837,
+      "cv_pct": 17.51418446422248
+    },
+    "tg128_tps": {
+      "mean": 66.50664,
+      "sd": 12.461242355921016,
+      "median": 66.4112,
+      "p95": 80.57822,
+      "min": 48.709,
+      "max": 83.9409,
+      "cv_pct": 18.736839443281173
+    },
+    "ttft_ms": {
+      "mean": 1152.538,
+      "sd": 124.24659379636934,
+      "median": 1198.21,
+      "p95": 1283.9060000000002,
+      "min": 1022.0,
+      "max": 1300.4,
+      "cv_pct": 10.780260069201132
+    },
+    "output_tps": {
+      "mean": 63.912420000000004,
+      "sd": 6.415684178402176,
+      "median": 63.8449,
+      "p95": 71.55362,
+      "min": 56.5753,
+      "max": 72.5762,
+      "cv_pct": 10.03824323723335
+    }
+  },
+  "peak_rss_mib_range": [
+    194.05,
+    194.27
+  ],
+  "comparability": {
+    "llama_cpp_metric_alignment": true,
+    "mlperf_client_metric_alignment": true,
+    "mlperf_certified": false,
+    "direct_external_runtime_comparison_valid": false,
+    "reason": "synthetic weights and token-by-token prefill; same public GGUF checkpoint not yet executed by MemVanta"
+  },
+  "public_target": {
+    "base_model": "HuggingFaceTB/SmolLM2-135M-Instruct",
+    "architecture": "LlamaForCausalLM",
+    "params_million": 134.5,
+    "candidate_gguf": "QuantFactory/SmolLM2-135M-Instruct.Q4_K_M.gguf",
+    "candidate_gguf_sha256": "8030f04528538d47bda434f6f0bdf3952c40a58123e4d5e755332f23731a8684"
+  }
+}

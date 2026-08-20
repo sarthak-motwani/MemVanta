@@ -1,0 +1,10 @@
+Internal ctest changing into directory: /mnt/data/memvanta_cpu_v0.7.2/build-check
+Test project /mnt/data/memvanta_cpu_v0.7.2/build-check
+    Start 1: memvanta_tests
+1/2 Test #1: memvanta_tests .....................   Passed    0.00 sec
+    Start 2: memvanta_tokenizer_tests
+2/2 Test #2: memvanta_tokenizer_tests ...........   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.02 sec

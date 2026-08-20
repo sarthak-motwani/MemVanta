@@ -1,0 +1,2 @@
+MemVanta v0.6 auto-tune: threads=4 batch=32 pp=415.668 tok/s
+ELAPSED=11.42 RSS=107780KB

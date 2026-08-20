@@ -1,0 +1,29 @@
+RUN=1
+| model | size | params | backend | threads | test | t/s |
+|---|---:|---:|---|---:|---|---:|
+| MemVanta SmolLM2-135M shape fixture | 85.77 MiB | 134.52 M | MemVanta CPU | 5 | pp512 | 155.03 ± 0.00 |
+| MemVanta SmolLM2-135M shape fixture | 85.77 MiB | 134.52 M | MemVanta CPU | 5 | tg128 | 58.36 ± 0.00 |
+load=22.84 ms peak_rss=112.07 MiB kv_alloc=5.62 MiB batch=32 kv=f16
+ELAPSED=6.30 RSS=114764KB
+RUN=2
+| model | size | params | backend | threads | test | t/s |
+|---|---:|---:|---|---:|---|---:|
+| MemVanta SmolLM2-135M shape fixture | 85.77 MiB | 134.52 M | MemVanta CPU | 5 | pp512 | 139.26 ± 0.00 |
+| MemVanta SmolLM2-135M shape fixture | 85.77 MiB | 134.52 M | MemVanta CPU | 5 | tg128 | 54.40 ± 0.00 |
+load=12.38 ms peak_rss=112.09 MiB kv_alloc=5.62 MiB batch=32 kv=f16
+ELAPSED=7.02 RSS=114776KB
+RUN=3
+| model | size | params | backend | threads | test | t/s |
+|---|---:|---:|---|---:|---|---:|
+| MemVanta SmolLM2-135M shape fixture | 85.77 MiB | 134.52 M | MemVanta CPU | 5 | pp512 | 158.83 ± 0.00 |
+| MemVanta SmolLM2-135M shape fixture | 85.77 MiB | 134.52 M | MemVanta CPU | 5 | tg128 | 47.35 ± 0.00 |
+load=11.06 ms peak_rss=111.99 MiB kv_alloc=5.62 MiB batch=32 kv=f16
+ELAPSED=6.79 RSS=114680KB
+RUN=4
+| model | size | params | backend | threads | test | t/s |
+|---|---:|---:|---|---:|---|---:|
+| MemVanta SmolLM2-135M shape fixture | 85.77 MiB | 134.52 M | MemVanta CPU | 5 | pp512 | 132.06 ± 0.00 |
+| MemVanta SmolLM2-135M shape fixture | 85.77 MiB | 134.52 M | MemVanta CPU | 5 | tg128 | 16.04 ± 0.00 |
+load=13.29 ms peak_rss=112.04 MiB kv_alloc=5.62 MiB batch=32 kv=f16
+ELAPSED=12.64 RSS=114728KB
+RUN=5

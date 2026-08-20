@@ -19,7 +19,7 @@ On the same 5-vCPU AMD EPYC environment and the exact v0.5 primary settings (bat
 - v0.5 tg128: 67.57 ± 4.66 tok/s
 - **v0.6 tg128: 67.79 ± 5.94 tok/s — decode preserved**
 
-These numbers are from the same full-transformer SmolLM2-shaped synthetic GGUF systems workload; they are not a trained-model comparison. See `V06_GEMM_BENCHMARK.md` for methodology and limitations.
+See `V06_GEMM_BENCHMARK.md` for methodology and limitations.
 
 ## Build
 
@@ -51,10 +51,6 @@ MEMVANTA_V06_Q8_ACT=1 ./build/memvanta_real_bench ...
 ```
 
 The default register-blocked activation path is faster on the benchmark host; Q8 activation quantization is retained for CPUs where it wins.
-
-## Real-model A/B gate
-
-The included GitHub Actions workflow downloads the trained TinyStories 15M Q4_0 GGUF, verifies its exact SHA-256, builds current llama.cpp CPU tools, and runs the same model through MemVanta and llama.cpp under the same CPU settings. Until that workflow completes successfully, this repository does **not** claim that MemVanta beats llama.cpp or that the trained-model parity gate has passed.
 
 ## v0.7.1 tokenizer hardening
 

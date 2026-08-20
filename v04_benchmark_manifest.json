@@ -1,0 +1,19 @@
+{
+  "version": "0.4.0",
+  "benchmark": "SmolLM2-135M shape-equivalent systems fixture",
+  "public_target": "QuantFactory/SmolLM2-135M-Instruct-GGUF/SmolLM2-135M-Instruct.Q4_0.gguf",
+  "public_target_sha256": "f68203bfb98b1b1e8c64fac75fab10c4e36acac081609573b4df0fcc19c90dd9",
+  "runs": 5,
+  "pp512_mean_tps": 49.6437,
+  "pp512_sample_sd": 12.623613132934643,
+  "pp512_median": 55.2854,
+  "tg128_mean_tps": 52.68784,
+  "tg128_sample_sd": 8.175792420493561,
+  "tg128_median": 52.3256,
+  "peak_rss_mib": 122.25,
+  "cpu": "AMD EPYC 9V74",
+  "allocated_cores": 5,
+  "ram_gib": 5.9,
+  "swap_gib": 0,
+  "warning": "Synthetic weights with exact target shapes/types; not trained SmolLM2 weights and not a llama.cpp comparison."
+}
