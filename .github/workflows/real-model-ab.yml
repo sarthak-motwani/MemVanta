@@ -1,5 +1,7 @@
 name: Real Model A/B
 
+# This workflow is intentionally push-triggered so changes to the runtime or
+# benchmark harness continuously re-validate the trained-model comparison.
 on:
   workflow_dispatch:
   push:
