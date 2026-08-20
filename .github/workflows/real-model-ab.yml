@@ -1,7 +1,5 @@
-name: Real Model A/B
+name: Real Model Validation
 
-# This workflow is intentionally push-triggered so changes to the runtime or
-# benchmark harness continuously re-validate the trained-model comparison.
 on:
   workflow_dispatch:
   push:
@@ -18,23 +16,18 @@ on:
 permissions:
   contents: read
 
-jobs:
-  stories15m-ab:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+env:
+  MODEL: stories15M-q4_0.gguf
+  MODEL_URL: https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true
+  MODEL_SHA256: 66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739
+  THREADS: 4
+  CTX: 128
 
-    env:
-      MODEL: stories15M-q4_0.gguf
-      MODEL_URL: https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true
-      MODEL_SHA256: 66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739
-      THREADS: 4
-      REPS: 5
-      PROMPT: 64
-      GEN: 64
-      CTX: 128
-      BATCH: 32
-      KV: f16
-      OUT: v072_stories15m_ab
+jobs:
+  trained-model-smoke:
+    name: Trained model smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout MemVanta
@@ -43,31 +36,107 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build curl git time
+          sudo apt-get install -y build-essential cmake ninja-build curl time
 
       - name: Build MemVanta
         run: |
           cmake -S . -B build-v072 -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build-v072 -j "$(nproc)"
 
-      - name: Run MemVanta tests
+      - name: Run unit tests
         run: ctest --test-dir build-v072 --output-on-failure
 
-      - name: Download trained TinyStories 15M Q4_0 GGUF
+      - name: Download and verify trained TinyStories model
         run: |
           curl -L --fail --retry 3 --retry-delay 2 "$MODEL_URL" -o "$MODEL"
           echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
           stat -c 'model_bytes=%s' "$MODEL"
 
-      - name: Build current llama.cpp CPU tools
+      - name: Tokenizer smoke test
+        run: ./build-v072/memvanta_tokenize --model "$MODEL" --text 'Once upon a time'
+
+      - name: Trained-model greedy generation
         run: |
-          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git llama.cpp
+          /usr/bin/time -v ./build-v072/memvanta_real \
+            --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
+            --temperature 0 --n 8 --prompt 'Once upon a time' \
+            > memvanta-trained-smoke.txt 2> memvanta-trained-smoke.stderr.txt
+          cat memvanta-trained-smoke.txt
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memvanta-trained-model-smoke
+          path: |
+            memvanta-trained-smoke.txt
+            memvanta-trained-smoke.stderr.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+  stories15m-ab:
+    name: Stories15M A/B benchmark
+    needs: trained-model-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      REPS: 3
+      PROMPT: 64
+      GEN: 64
+      BATCH: 32
+      KV: f16
+      OUT: v072_stories15m_ab
+      LLAMA_CPP_REF: master
+
+    steps:
+      - name: Checkout MemVanta
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl git time ccache
+
+      - name: Configure compiler cache
+        run: |
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          ccache --zero-stats
+
+      - name: Cache compiler outputs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: memvanta-llama-ccache-${{ runner.os }}-${{ env.LLAMA_CPP_REF }}
+          restore-keys: |
+            memvanta-llama-ccache-${{ runner.os }}-
+
+      - name: Build MemVanta
+        run: |
+          cmake -S . -B build-v072 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-v072 -j "$(nproc)"
+          ctest --test-dir build-v072 --output-on-failure
+
+      - name: Download and verify trained TinyStories model
+        run: |
+          curl -L --fail --retry 3 --retry-delay 2 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+          stat -c 'model_bytes=%s' "$MODEL"
+
+      - name: Build llama.cpp CPU tools
+        run: |
+          git clone --filter=blob:none --depth 1 --branch "$LLAMA_CPP_REF" https://github.com/ggml-org/llama.cpp.git llama.cpp
+          echo "llama_cpp_commit=$(git -C llama.cpp rev-parse HEAD)" | tee llama_cpp_commit.txt
           cmake -S llama.cpp -B llama.cpp/build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DGGML_CUDA=OFF \
             -DGGML_METAL=OFF \
             -DLLAMA_CURL=OFF
           cmake --build llama.cpp/build --target llama-bench llama-cli -j "$(nproc)"
+          ccache --show-stats
 
       - name: Run same-model MemVanta vs llama.cpp benchmark
         env:
@@ -87,5 +156,6 @@ jobs:
           name: memvanta-stories15m-real-model-ab
           path: |
             v072_stories15m_ab/**
+            llama_cpp_commit.txt
           if-no-files-found: warn
           retention-days: 30
