@@ -1,0 +1,7 @@
+| model | size | params | backend | threads | test | result |
+|---|---:|---:|---|---:|---|---:|
+| MemVanta SmolLM2-shaped Q8_0 | 144.28 MiB | 134.48 M | CPU/AVX2 | 5 | pp512 | 50.18 ± 0.00 t/s |
+| MemVanta SmolLM2-shaped Q8_0 | 144.28 MiB | 134.48 M | CPU/AVX2 | 5 | tg128 | 67.13 ± 0.00 t/s |
+
+MLPerf-client-style (128 input / 256 output): TTFT 1198.21 ± 0.00 ms; output TPS 63.84 ± 0.00 t/s
+Load/init: 338.03 ms; Q8 weight bytes: 144.28 MiB; KV capacity: 45.00 MiB; peak RSS: 194.24 MiB

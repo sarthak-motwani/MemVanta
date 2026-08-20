@@ -1,0 +1,5 @@
+| model | size | params | backend | threads | test | t/s |
+|---|---:|---:|---|---:|---|---:|
+| MemVanta SmolLM2-135M shape fixture | 85.77 MiB | 134.52 M | MemVanta CPU | 5 | pp512 | 119.62 ± 0.00 |
+| MemVanta SmolLM2-135M shape fixture | 85.77 MiB | 134.52 M | MemVanta CPU | 5 | tg128 | 62.46 ± 0.00 |
+load=15.06 ms peak_rss=123.98 MiB kv_alloc=11.25 MiB batch=64 kv=f32

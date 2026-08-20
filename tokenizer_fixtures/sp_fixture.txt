@@ -1,0 +1,11 @@
+Hello world
+The quick brown fox jumps over the lazy dog.
+Data science and machine learning in C++ are useful.
+नमस्ते दुनिया
+भारत में कृत्रिम बुद्धिमत्ता
+こんにちは 世界
+你好 世界
+emoji 😀 🚀 ❤️
+Café naïve résumé coöperate
+if (x < 10) { return x * x; }
+spaces   tabs	and newlines

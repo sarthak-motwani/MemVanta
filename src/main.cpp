@@ -1,0 +1,11 @@
+#include "memvanta/common.hpp"
+#include "memvanta/runtime.hpp"
+#include <algorithm>
+#include <cctype>
+#include <iostream>
+#include <stdexcept>
+namespace memvanta { std::uint64_t parse_size(const std::string&s){ if(s.empty()) throw std::runtime_error("empty size"); std::size_t idx=0; double v=std::stod(s,&idx); std::string suf=s.substr(idx); std::transform(suf.begin(),suf.end(),suf.begin(),[](unsigned char c){return std::tolower(c);}); double m=1; if(suf=="k"||suf=="kb"||suf=="kib")m=1024.; else if(suf=="m"||suf=="mb"||suf=="mib")m=1024.*1024.; else if(suf=="g"||suf=="gb"||suf=="gib")m=1024.*1024.*1024.; else if(!suf.empty()&&suf!="b") throw std::runtime_error("bad size suffix: "+suf); return static_cast<std::uint64_t>(v*m); } }
+static void usage(){ std::cout<<"memvanta run <file> [--chunk 64M] [--cache 512M] [--passes 1] [--prefetch 2] [--zero-copy]\n"; }
+int main(int argc,char**argv){ try{ if(argc<3||std::string(argv[1])!="run"){usage();return 1;} std::string file=argv[2]; std::uint64_t chunk=64ull<<20,cache=512ull<<20; std::uint32_t passes=1,pf=2; bool copy=true; for(int i=3;i<argc;++i){ std::string a=argv[i]; auto val=[&](){if(i+1>=argc)throw std::runtime_error("missing value for "+a);return std::string(argv[++i]);}; if(a=="--chunk")chunk=memvanta::parse_size(val()); else if(a=="--cache")cache=memvanta::parse_size(val()); else if(a=="--passes")passes=std::stoul(val()); else if(a=="--prefetch")pf=std::stoul(val()); else if(a=="--zero-copy")copy=false; else throw std::runtime_error("unknown arg: "+a); }
+ memvanta::TensorStore store(file,chunk); memvanta::Runtime rt(store,{cache,passes,pf,copy}); auto st=rt.run_stream(); std::cout<<"MemVanta CPU 0.2\nModel/file: "<<memvanta::gib(store.file_size())<<" GiB\nChunks: "<<store.count()<<" x up to "<<memvanta::mib(store.chunk_bytes())<<" MiB\nMode: "<<(copy?"bounded LRU cache":"zero-copy mmap")<<"\nElapsed: "<<st.seconds<<" s\nEffective stream: "<<st.gib_per_s<<" GiB/s\nPeak RSS: "<<st.peak_rss_kb/1024.0<<" MiB\nCache hits: "<<st.cache.hits<<" misses: "<<st.cache.misses<<" evictions: "<<st.cache.evictions<<"\nCopied: "<<memvanta::gib(st.cache.bytes_copied)<<" GiB\nChecksum: "<<st.checksum<<"\n"; }
+ catch(const std::exception&e){std::cerr<<"error: "<<e.what()<<"\n";return 2;} }
