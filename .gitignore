@@ -1,0 +1,47 @@
+# Build outputs
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Compiler / linker outputs
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Models and large generated artifacts
+*.gguf
+*.bin
+*.safetensors
+*.reu
+
+# Benchmark outputs
+v0*_*/
+benchmark-results/
+*.time.txt
+*.stdout.txt
+*.stderr.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.swp
+*~
