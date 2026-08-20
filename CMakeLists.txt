@@ -42,12 +42,12 @@ target_link_libraries(memvanta_tests PRIVATE memvanta_core)
 enable_testing()
 add_test(NAME memvanta_tests COMMAND memvanta_tests)
 
-
-
 add_executable(memvanta_real src/real_main.cpp)
 target_link_libraries(memvanta_real PRIVATE memvanta_core)
 add_executable(memvanta_real_bench benchmarks/real_model_bench.cpp)
 target_link_libraries(memvanta_real_bench PRIVATE memvanta_core)
+add_executable(memvanta_profile benchmarks/profile_bench.cpp)
+target_link_libraries(memvanta_profile PRIVATE memvanta_core)
 
 add_executable(memvanta_llama2c_bench benchmarks/llama2c_bench.cpp)
 target_link_libraries(memvanta_llama2c_bench PRIVATE memvanta_core)
