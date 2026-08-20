@@ -53,7 +53,9 @@ jobs:
           stat -c 'model_bytes=%s' "$MODEL"
 
       - name: Tokenizer smoke test
-        run: ./build-v072/memvanta_tokenize --model "$MODEL" --text 'Once upon a time'
+        run: |
+          ./build-v072/memvanta_tokenize "$MODEL" 'Once upon a time' --bos \
+            | tee memvanta-tokenizer-smoke.txt
 
       - name: Trained-model greedy generation
         run: |
@@ -69,6 +71,7 @@ jobs:
         with:
           name: memvanta-trained-model-smoke
           path: |
+            memvanta-tokenizer-smoke.txt
             memvanta-trained-smoke.txt
             memvanta-trained-smoke.stderr.txt
           if-no-files-found: warn
