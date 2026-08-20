@@ -30,6 +30,7 @@ fi
   stat -c 'model_bytes=%s' "$MODEL"
   echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=$KV reps=$REPS"
   echo "memvanta_timeout_s=$MEMVANTA_TIMEOUT llama_timeout_s=$LLAMA_TIMEOUT"
+  echo "client_workload=disabled"
   uname -a
   lscpu
   free -h
@@ -43,7 +44,7 @@ timeout --signal=TERM --kill-after=30s "$MEMVANTA_TIMEOUT" \
   /usr/bin/time -v ./build-v072/memvanta_real_bench \
     --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
     --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" --kv "$KV" \
-    --warmup 0 --reps "$REPS" --csv "$OUT/memvanta.csv" \
+    --warmup 0 --reps "$REPS" --no-client --csv "$OUT/memvanta.csv" \
     > "$OUT/memvanta.stdout.txt" 2> "$OUT/memvanta.time.txt"
 mem_rc=$?
 set -e
