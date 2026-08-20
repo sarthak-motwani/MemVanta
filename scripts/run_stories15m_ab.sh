@@ -32,14 +32,12 @@ fi
   echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=$KV reps=$REPS warmup=$WARMUP"
   echo "memvanta_timeout_s=$MEMVANTA_TIMEOUT llama_timeout_s=$LLAMA_TIMEOUT"
   echo "client_workload=disabled"
+  echo "omp_num_threads=${OMP_NUM_THREADS:-unset} omp_dynamic=${OMP_DYNAMIC:-unset} omp_proc_bind=${OMP_PROC_BIND:-unset}"
   uname -a
   lscpu
   free -h
 } > "$OUT/environment.txt"
 
-# status controls benchmark validity only. Greedy-generation checks are recorded
-# separately so a valid performance A/B is not marked failed by an auxiliary
-# parity/smoke command.
 status=0
 
 echo "[benchmark] starting MemVanta at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee "$OUT/progress.txt"
@@ -71,7 +69,8 @@ if [[ -x "$LLAMA_BIN/llama-bench" ]]; then
   set +e
   timeout --signal=TERM --kill-after=15s "$LLAMA_TIMEOUT" \
     /usr/bin/time -v "$LLAMA_BIN/llama-bench" -m "$MODEL" -p "$PROMPT" -n "$GEN" \
-      -t "$THREADS" -r "$REPS" -ngl 0 -o json \
+      -t "$THREADS" -r "$REPS" -b "$BATCH" -ub "$BATCH" \
+      -ctk "$KV" -ctv "$KV" -ngl 0 -o json \
       > "$OUT/llama-bench.json" 2> "$OUT/llama-bench.time.txt"
   llama_rc=$?
   set -e
@@ -89,7 +88,8 @@ if [[ -x "$LLAMA_BIN/llama-cli" ]]; then
   timeout --signal=TERM --kill-after=15s 120 \
     "$LLAMA_BIN/llama-cli" -m "$MODEL" -ngl 0 -t "$THREADS" -c "$CTX" \
       -p 'Once upon a time' -n 8 --temp 0 --seed 42 \
-      > "$OUT/llama.greedy.txt" 2> "$OUT/llama.greedy.stderr.txt"
+      --no-conversation --single-turn --no-display-prompt --no-show-timings \
+      < /dev/null > "$OUT/llama.greedy.txt" 2> "$OUT/llama.greedy.stderr.txt"
   llama_greedy_rc=$?
   set -e
   echo "$llama_greedy_rc" > "$OUT/llama.greedy.exitcode.txt"

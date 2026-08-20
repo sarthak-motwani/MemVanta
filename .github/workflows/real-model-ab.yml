@@ -94,7 +94,12 @@ jobs:
       MEMVANTA_TIMEOUT: 1800
       LLAMA_TIMEOUT: 900
       OUT: v072_stories15m_ab
-      LLAMA_CPP_REF: master
+      LLAMA_CPP_REF: 6503355df0eb4f65875012523263c302fe0088c1
+      OMP_NUM_THREADS: 4
+      OMP_DYNAMIC: 'FALSE'
+      OMP_PROC_BIND: close
+      OMP_PLACES: cores
+      MALLOC_ARENA_MAX: 2
 
     steps:
       - name: Checkout MemVanta
@@ -131,9 +136,12 @@ jobs:
           echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
           stat -c 'model_bytes=%s' "$MODEL"
 
-      - name: Build llama.cpp CPU tools
+      - name: Build pinned llama.cpp CPU tools
         run: |
-          git clone --filter=blob:none --depth 1 --branch "$LLAMA_CPP_REF" https://github.com/ggml-org/llama.cpp.git llama.cpp
+          git init llama.cpp
+          git -C llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C llama.cpp fetch --depth 1 origin "$LLAMA_CPP_REF"
+          git -C llama.cpp checkout --detach FETCH_HEAD
           echo "llama_cpp_commit=$(git -C llama.cpp rev-parse HEAD)" | tee llama_cpp_commit.txt
           cmake -S llama.cpp -B llama.cpp/build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
