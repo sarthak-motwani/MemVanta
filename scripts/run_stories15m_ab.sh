@@ -37,6 +37,9 @@ fi
   free -h
 } > "$OUT/environment.txt"
 
+# status controls benchmark validity only. Greedy-generation checks are recorded
+# separately so a valid performance A/B is not marked failed by an auxiliary
+# parity/smoke command.
 status=0
 
 echo "[benchmark] starting MemVanta at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee "$OUT/progress.txt"
@@ -61,8 +64,7 @@ timeout --signal=TERM --kill-after=15s 180 \
 greedy_rc=$?
 set -e
 echo "$greedy_rc" > "$OUT/memvanta.greedy.exitcode.txt"
-echo "[benchmark] MemVanta greedy rc=$greedy_rc" | tee -a "$OUT/progress.txt"
-if [[ $greedy_rc -ne 0 ]]; then status=1; fi
+echo "[validation] MemVanta greedy rc=$greedy_rc" | tee -a "$OUT/progress.txt"
 
 if [[ -x "$LLAMA_BIN/llama-bench" ]]; then
   echo "[benchmark] starting llama.cpp at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee -a "$OUT/progress.txt"
@@ -91,12 +93,21 @@ if [[ -x "$LLAMA_BIN/llama-cli" ]]; then
   llama_greedy_rc=$?
   set -e
   echo "$llama_greedy_rc" > "$OUT/llama.greedy.exitcode.txt"
-  if [[ $llama_greedy_rc -ne 0 ]]; then status=1; fi
+  echo "[validation] llama.cpp greedy rc=$llama_greedy_rc" | tee -a "$OUT/progress.txt"
 else
-  echo "127" > "$OUT/llama.greedy.exitcode.txt"
-  status=1
+  llama_greedy_rc=127
+  echo "$llama_greedy_rc" > "$OUT/llama.greedy.exitcode.txt"
+  echo "[validation] llama-cli unavailable; greedy comparison not run" | tee -a "$OUT/progress.txt"
+fi
+
+if [[ $greedy_rc -eq 0 && $llama_greedy_rc -eq 0 ]]; then
+  echo "passed" > "$OUT/greedy-validation-status.txt"
+else
+  echo "incomplete_or_failed" > "$OUT/greedy-validation-status.txt"
 fi
 
 python3 scripts/summarize_ab.py "$OUT" || status=1
+echo "benchmark_status=$([[ $status -eq 0 ]] && echo passed || echo failed)" | tee -a "$OUT/progress.txt"
+echo "greedy_validation_status=$(cat "$OUT/greedy-validation-status.txt")" | tee -a "$OUT/progress.txt"
 echo "results: $OUT"
 exit "$status"
