@@ -1,0 +1,101 @@
+name: PR Benchmark Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'benchmarks/**'
+      - '.github/workflows/pr-benchmark-evidence.yml'
+      - 'CMakeLists.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MODEL: stories15M-q4_0.gguf
+      MODEL_URL: https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true
+      MODEL_SHA256: 66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739
+      OMP_NUM_THREADS: 4
+      OMP_DYNAMIC: 'FALSE'
+      OMP_PROC_BIND: close
+      OMP_PLACES: cores
+      MALLOC_ARENA_MAX: 2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl time
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j "$(nproc)"
+          ctest --test-dir build --output-on-failure
+
+      - name: Record environment
+        run: |
+          mkdir -p benchmark-evidence
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "runner_os=$RUNNER_OS"
+            uname -a
+            lscpu
+            free -h
+          } > benchmark-evidence/environment.txt
+
+      - name: Run kernel microbenchmarks
+        run: |
+          ./build/memvanta_kernel_bench \
+            --rows 4096 --cols 4096 --batch 32 --threads 4 --reps 7 \
+            | tee benchmark-evidence/kernel-bench.csv
+
+      - name: Download and verify TinyStories model
+        run: |
+          curl -L --fail --retry 3 --retry-delay 2 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+          stat -c 'model_bytes=%s' "$MODEL" | tee benchmark-evidence/model.txt
+
+      - name: Profile TinyStories 1-thread
+        run: |
+          /usr/bin/time -v ./build/memvanta_profile \
+            --model "$MODEL" --threads 1 --ctx 128 --prompt 32 --gen 8 --batch 16 \
+            --csv benchmark-evidence/layer-profile-t1.csv \
+            > benchmark-evidence/profile-t1.txt \
+            2> benchmark-evidence/profile-t1.time.txt
+          cat benchmark-evidence/profile-t1.txt
+
+      - name: Profile TinyStories 4-thread
+        run: |
+          /usr/bin/time -v ./build/memvanta_profile \
+            --model "$MODEL" --threads 4 --ctx 128 --prompt 32 --gen 8 --batch 16 \
+            --csv benchmark-evidence/layer-profile-t4.csv \
+            > benchmark-evidence/profile-t4.txt \
+            2> benchmark-evidence/profile-t4.time.txt
+          cat benchmark-evidence/profile-t4.txt
+
+      - name: Greedy generation correctness smoke
+        run: |
+          ./build/memvanta_real \
+            --model "$MODEL" --threads 4 --ctx 128 \
+            --temperature 0 --n 8 --prompt 'Once upon a time' \
+            | tee benchmark-evidence/greedy.txt
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memvanta-pr-benchmark-evidence
+          path: benchmark-evidence/**
+          if-no-files-found: warn
+          retention-days: 30
