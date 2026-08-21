@@ -1,7 +1,7 @@
 # MemVanta
 
 [![Build](https://github.com/sauravsingla/MemVanta/actions/workflows/ci.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/ci.yml)
-[![3B A/B](https://github.com/sauravsingla/MemVanta/actions/workflows/threeb-model-ab.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/threeb-model-ab.yml)
+[![7B A/B](https://github.com/sauravsingla/MemVanta/actions/workflows/sevenb-model-ab.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/sevenb-model-ab.yml)
 [![RAM Constrained 1B](https://github.com/sauravsingla/MemVanta/actions/workflows/ram-constrained.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/ram-constrained.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -9,7 +9,7 @@
 
 MemVanta is an experimental C++20 inference runtime for **quantized GGUF language models on CPUs**, designed for systems where **RAM is the constraint**. It explores mmap-backed model access, bounded caching, quantized kernels, paged KV cache, and reproducible memory-pressure benchmarking.
 
-> **OpenLLaMA 3B v2 Q4_0:** MemVanta used **45.43% less peak RSS** than pinned llama.cpp on the exact same GGUF. llama.cpp remained ~4.6× faster, so this is a **memory-efficiency result, not a throughput win**.
+> **OpenLLaMA 7B v2 Q4_0:** MemVanta used **47.50% less peak RSS** than pinned llama.cpp on the exact same GGUF across 5 measured CPU runs. llama.cpp remained substantially faster, so this is a **memory-efficiency result, not a throughput win**.
 
 ## Who is this for?
 
@@ -23,19 +23,19 @@ MemVanta is currently most useful to:
 
 It is **not yet a drop-in replacement for llama.cpp** or a polished end-user chatbot runtime.
 
-## Verified result
+## Verified 7B result
 
-**OpenLLaMA 3B v2 Q4_0 · same generated GGUF · CPU only · 4 threads · pp512/tg128 · batch 32 · F16 KV · 5 measured runs**
+**OpenLLaMA 7B v2 Q4_0 · exact same GGUF · CPU only · 4 threads · pp512/tg128 · context 768 · batch 32 · F16 KV · 1 warm-up + 5 measured runs**
 
 | Metric | MemVanta | llama.cpp |
 |---|---:|---:|
-| Peak RSS | **2070.52 MiB** | 3794.18 MiB |
-| Prompt processing | 5.28 tok/s | 24.46 tok/s |
-| Token generation | 3.43 tok/s | 15.67 tok/s |
+| Peak RSS | **3983412 KiB (~3.80 GiB)** | 7586960 KiB (~7.24 GiB) |
+| Prompt processing | 3.15 ± 0.04 tok/s | 45.82 ± 0.96 tok/s |
+| Token generation | 1.52 ± 0.02 tok/s | 7.76 ± 0.09 tok/s |
 
-**Peak resident-memory reduction: 45.43% (~1.68 GiB).**
+**Peak resident-memory reduction: 47.50% (~3.44 GiB less).**
 
-Raw evidence: [`results/openllama-3b-v2-ab/`](results/openllama-3b-v2-ab/)
+Raw evidence: [`results/openllama-7b-v2-ab/`](results/openllama-7b-v2-ab/)
 
 ### Memory-pressure proof
 
@@ -82,6 +82,7 @@ ctest --test-dir build --output-on-failure
 
 Published runs preserve raw evidence instead of relying only on transient CI logs.
 
+- [`results/openllama-7b-v2-ab/`](results/openllama-7b-v2-ab/) — 7B repeated exact-same-GGUF A/B
 - [`results/openllama-3b-v2-ab/`](results/openllama-3b-v2-ab/) — 3B repeated same-GGUF A/B
 - [`results/tinyllama-1.1b-ram-constrained/`](results/tinyllama-1.1b-ram-constrained/) — constrained-memory sweep
 - [`results/tinyllama-1.1b-ab/`](results/tinyllama-1.1b-ab/) — 1.1B repeated A/B
@@ -93,9 +94,9 @@ The goal is simple:
 
 > **Run larger quantized LLMs within smaller RAM budgets on commodity CPUs.**
 
-Current work is focused on **7B validation, tighter constrained-memory boundaries, physical-CPU reproduction, and throughput optimization**.
+Current work is focused on **7B constrained-memory boundaries, physical-CPU reproduction, numerical validation, and throughput optimization**.
 
-MemVanta is an **engineering prototype under active development**. Published results show a memory-efficiency advantage on the tested models; they do not establish a universal scaling law or throughput advantage.
+MemVanta is an **engineering prototype under active development**. Published trained-model evidence now reaches 7B and consistently shows lower peak RSS on the tested workloads; it does not establish a universal scaling law or throughput advantage.
 
 ## Contributing
 
