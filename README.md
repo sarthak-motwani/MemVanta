@@ -2,16 +2,18 @@
 
 [![Build](https://github.com/sauravsingla/MemVanta/actions/workflows/ci.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/ci.yml)
 [![1.1B A/B](https://github.com/sauravsingla/MemVanta/actions/workflows/oneb-model-ab.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/oneb-model-ab.yml)
-[![SmolLM2-360M A/B](https://github.com/sauravsingla/MemVanta/actions/workflows/medium-model-ab.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/medium-model-ab.yml)
+[![RAM Constrained 1B](https://github.com/sauravsingla/MemVanta/actions/workflows/ram-constrained.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/ram-constrained.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **Memory-adaptive C++ LLM inference for GGUF models.**
 
 MemVanta is an experimental CPU-first runtime focused on **reducing resident-memory pressure** while executing quantized language models natively.
 
-> **Verified 1.1B result:** on TinyLlama 1.1B Q4_0, MemVanta used **45.88% less peak RSS** than pinned llama.cpp in a repeated CPU-only same-GGUF benchmark.
+> **TinyLlama 1.1B:** **45.88% lower peak RSS** than pinned llama.cpp in a repeated same-GGUF benchmark, and successful execution at a **512 MiB cgroup memory ceiling** where llama.cpp was OOM-killed.
 
-## Latest benchmark
+## 1.1B results
+
+### Same-model A/B
 
 **TinyLlama 1.1B Q4_0 · same GGUF · CPU only · 4 threads · pp512/tg128 · batch 32 · F16 KV · 1 warm-up + 5 measured runs**
 
@@ -25,7 +27,21 @@ MemVanta saved about **533 MiB of peak resident memory** in this run. This is a 
 
 Raw evidence: [`results/tinyllama-1.1b-ab/`](results/tinyllama-1.1b-ab/)
 
-Supporting trained-model results show the same direction:
+### Constrained-memory boundary
+
+**Linux cgroup-v2 `MemoryMax` · swap disabled · same TinyLlama 1.1B Q4_0 GGUF · 4 threads · pp128/tg32 · context 768 · batch 32 · F16 KV**
+
+| Memory ceiling | MemVanta | llama.cpp |
+|---:|:---:|:---:|
+| 640 MiB | ✅ | ✅ |
+| 576 MiB | ✅ | ❌ OOM |
+| 512 MiB | ✅ | ❌ OOM |
+
+Within the tested sweep, MemVanta's lowest successful ceiling was **512 MiB** versus **640 MiB** for llama.cpp — a **128 MiB / 20% lower successful memory ceiling**. This is an execution-under-pressure result, not a throughput comparison.
+
+Raw evidence: [`results/tinyllama-1.1b-ram-constrained/`](results/tinyllama-1.1b-ram-constrained/)
+
+Supporting trained-model A/B results show the same memory direction:
 - **SmolLM2-360M:** 40.59% lower peak RSS — [`results/smollm2-360m-ab/`](results/smollm2-360m-ab/)
 - **TinyStories 15M:** 29.0% lower peak RSS — [`results/stories15m-repeated-ab/`](results/stories15m-repeated-ab/)
 
@@ -46,7 +62,7 @@ Current focus:
 - batched prefill and dedicated decode paths
 - GPT-2 and Llama/SentencePiece-style tokenization
 - deterministic trained-model validation
-- reproducible MemVanta vs llama.cpp A/B benchmarks
+- reproducible MemVanta vs llama.cpp A/B and memory-pressure benchmarks
 
 ## Build
 
@@ -80,17 +96,17 @@ Successful runs publish raw evidence into the repository rather than leaving it 
 ### Evidence
 
 - [`results/tinyllama-1.1b-ab/`](results/tinyllama-1.1b-ab/) — TinyLlama 1.1B repeated same-model A/B
+- [`results/tinyllama-1.1b-ram-constrained/`](results/tinyllama-1.1b-ram-constrained/) — TinyLlama 1.1B cgroup memory-pressure sweep
 - [`results/smollm2-360m-ab/`](results/smollm2-360m-ab/) — SmolLM2-360M repeated same-model A/B
 - [`results/stories15m-repeated-ab/`](results/stories15m-repeated-ab/) — TinyStories 15M repeated same-model A/B
-- [`results/smollm2-360m/`](results/smollm2-360m/) — native SmolLM2-360M validation
 - [`V072_REAL_MODEL_AB.md`](V072_REAL_MODEL_AB.md) — A/B protocol
 - [`V073_PERFORMANCE_HARDENING.md`](V073_PERFORMANCE_HARDENING.md) — runtime and benchmark hardening
 
 ## Status
 
-MemVanta is an **engineering prototype under active development**. Current evidence supports a consistent memory-efficiency direction from 15M to 1.1B parameters, while llama.cpp remains substantially faster on the published CPU workloads.
+MemVanta is an **engineering prototype under active development**. Current evidence shows a consistent memory-efficiency direction from 15M to 1.1B parameters and a verified constrained-memory advantage at 1.1B, while llama.cpp remains substantially faster on the published CPU workloads.
 
-Next milestones: **RAM-constrained 1.1B testing**, larger trained checkpoints (3B → 7B), physical-CPU reproduction, and a direct demonstration of inference when the model exceeds available RAM.
+Next milestones: **3B → 7B trained checkpoints**, physical-CPU reproduction, throughput optimization, and a direct real-model demonstration where the model exceeds available RAM.
 
 ## Contributing
 
