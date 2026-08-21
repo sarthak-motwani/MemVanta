@@ -1,0 +1,1 @@
+https://huggingface.co/mav23/open_llama_3b_v2-GGUF/resolve/main/open_llama_3b_v2.Q4_0.gguf?download=true
