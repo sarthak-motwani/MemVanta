@@ -1,0 +1,142 @@
+name: Medium Model A/B
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/medium-model-ab.yml'
+
+permissions:
+  contents: read
+
+env:
+  MODEL: SmolLM2-360M.Q4_0.gguf
+  MODEL_URL: https://huggingface.co/QuantFactory/SmolLM2-360M-GGUF/resolve/main/SmolLM2-360M.Q4_0.gguf?download=true
+  MODEL_SHA256: 88bbd5cac17036bf50905a0a660078b63426cea1c7fc6e4afa955bc8422b043c
+  THREADS: 4
+  CTX: 768
+  PROMPT: 512
+  GEN: 128
+  BATCH: 32
+  KV: f16
+  REPS: 5
+  WARMUP: 1
+  LLAMA_CPP_REF: 6503355df0eb4f65875012523263c302fe0088c1
+  OMP_NUM_THREADS: 4
+  OMP_DYNAMIC: 'FALSE'
+  OMP_PROC_BIND: close
+  OMP_PLACES: cores
+  MALLOC_ARENA_MAX: 2
+
+jobs:
+  smollm2-360m-ab:
+    name: SmolLM2 360M Q4_0 repeated A/B
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout MemVanta
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl git time ccache python3
+
+      - name: Build MemVanta
+        run: |
+          cmake -S . -B build-medium-ab -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-medium-ab -j "$(nproc)"
+          ctest --test-dir build-medium-ab --output-on-failure
+
+      - name: Download and verify SmolLM2 360M
+        run: |
+          curl -L --fail --retry 3 --retry-delay 2 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+
+      - name: Build pinned llama.cpp CPU tools
+        run: |
+          git init llama.cpp
+          git -C llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C llama.cpp fetch --depth 1 origin "$LLAMA_CPP_REF"
+          git -C llama.cpp checkout --detach FETCH_HEAD
+          cmake -S llama.cpp -B llama.cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=OFF -DGGML_METAL=OFF -DLLAMA_CURL=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build llama.cpp/build --target llama-bench llama-cli -j "$(nproc)"
+
+      - name: Record provenance
+        run: |
+          mkdir -p smollm2-360m-ab
+          {
+            echo "model=$MODEL"
+            echo "model_sha256=$MODEL_SHA256"
+            echo "memvanta_commit=$GITHUB_SHA"
+            echo "llama_cpp_ref=$LLAMA_CPP_REF"
+            echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=$KV reps=$REPS warmup=$WARMUP"
+            uname -a
+            lscpu
+          } > smollm2-360m-ab/environment.txt
+
+      - name: Run MemVanta repeated benchmark
+        run: |
+          /usr/bin/time -v ./build-medium-ab/memvanta_real_bench \
+            --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
+            --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" --kv "$KV" \
+            --warmup "$WARMUP" --reps "$REPS" --no-client \
+            --csv smollm2-360m-ab/memvanta.csv \
+            > smollm2-360m-ab/memvanta.stdout.txt \
+            2> smollm2-360m-ab/memvanta.time.txt
+
+      - name: Run llama.cpp repeated benchmark
+        run: |
+          /usr/bin/time -v ./llama.cpp/build/bin/llama-bench \
+            -m "$MODEL" -p "$PROMPT" -n "$GEN" -t "$THREADS" -r "$REPS" \
+            -b "$BATCH" -ub "$BATCH" -ctk "$KV" -ctv "$KV" -ngl 0 -o json \
+            > smollm2-360m-ab/llama-bench.json \
+            2> smollm2-360m-ab/llama-bench.time.txt
+
+      - name: Summarize A/B
+        run: |
+          python3 - <<'PY'
+          import csv,json,pathlib,re,statistics
+          out=pathlib.Path('smollm2-360m-ab')
+          env={}
+          for line in (out/'environment.txt').read_text().splitlines():
+              for p in line.split():
+                  if '=' in p:
+                      k,v=p.split('=',1); env[k]=v
+          rows=list(csv.DictReader((out/'memvanta.csv').open()))
+          def vals(names):
+              for n in names:
+                  if rows and n in rows[0]: return [float(r[n]) for r in rows]
+              return []
+          mpp=vals(['pp_tps','prompt_tps','pp_tokens_per_sec']); mtg=vals(['tg_tps','gen_tps','generation_tps','tg_tokens_per_sec'])
+          lj=json.loads((out/'llama-bench.json').read_text()); lj=[lj] if isinstance(lj,dict) else lj
+          lpp=[]; ltg=[]
+          for r in lj:
+              s=r.get('samples_ts') or [r.get('avg_ts')]
+              s=[float(x) for x in s if x is not None]
+              if int(r.get('n_prompt',0) or 0) and not int(r.get('n_gen',0) or 0): lpp += s
+              if int(r.get('n_gen',0) or 0) and not int(r.get('n_prompt',0) or 0): ltg += s
+          def rss(p):
+              m=re.search(r'Maximum resident set size \(kbytes\):\s*(\d+)',p.read_text(errors='replace')); return int(m.group(1)) if m else None
+          def d(x):
+              return {'mean':statistics.mean(x),'sd':statistics.stdev(x) if len(x)>1 else 0,'median':statistics.median(x),'min':min(x),'max':max(x),'cv_pct':(statistics.stdev(x)/statistics.mean(x)*100 if len(x)>1 else 0)}
+          s={'benchmark':'SmolLM2-360M Q4_0 same-model CPU A/B','model':env['model'],'prompt_tokens':int(env['prompt']),'generation_tokens':int(env['gen']),'context':int(env['ctx']),'threads':int(env['threads']),'batch':int(env['batch']),'kv':env['kv'],'repetitions':int(env['reps']),'warmup':int(env['warmup']),'memvanta_pp':d(mpp),'memvanta_tg':d(mtg),'llama_pp':d(lpp),'llama_tg':d(ltg),'memvanta_peak_rss_kib':rss(out/'memvanta.time.txt'),'llama_peak_rss_kib':rss(out/'llama-bench.time.txt')}
+          s['memvanta_vs_llama_pp_ratio']=s['memvanta_pp']['mean']/s['llama_pp']['mean']
+          s['memvanta_vs_llama_tg_ratio']=s['memvanta_tg']['mean']/s['llama_tg']['mean']
+          s['memvanta_rss_reduction_pct']=(1-s['memvanta_peak_rss_kib']/s['llama_peak_rss_kib'])*100
+          (out/'summary.json').write_text(json.dumps(s,indent=2)+'\n')
+          lines=['# SmolLM2-360M Q4_0 — MemVanta vs llama.cpp','',f"Same GGUF, CPU-only, {s['threads']} threads, pp{s['prompt_tokens']}/tg{s['generation_tokens']}, context {s['context']}, batch {s['batch']}, KV={s['kv']}, {s['repetitions']} repetitions.",'',f"- MemVanta pp: {s['memvanta_pp']['mean']:.2f} ± {s['memvanta_pp']['sd']:.2f} tok/s",f"- llama.cpp pp: {s['llama_pp']['mean']:.2f} ± {s['llama_pp']['sd']:.2f} tok/s",f"- MemVanta tg: {s['memvanta_tg']['mean']:.2f} ± {s['memvanta_tg']['sd']:.2f} tok/s",f"- llama.cpp tg: {s['llama_tg']['mean']:.2f} ± {s['llama_tg']['sd']:.2f} tok/s",f"- MemVanta peak RSS: {s['memvanta_peak_rss_kib']} KiB",f"- llama.cpp peak RSS: {s['llama_peak_rss_kib']} KiB",f"- MemVanta RSS reduction: {s['memvanta_rss_reduction_pct']:.2f}%"]
+          (out/'SUMMARY.md').write_text('\n'.join(lines)+'\n')
+          print((out/'SUMMARY.md').read_text())
+          PY
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memvanta-smollm2-360m-ab
+          path: smollm2-360m-ab/**
+          if-no-files-found: warn
+          retention-days: 30
