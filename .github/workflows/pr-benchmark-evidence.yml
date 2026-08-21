@@ -1,6 +1,14 @@
 name: PR Benchmark Evidence
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'benchmarks/**'
+      - '.github/workflows/pr-benchmark-evidence.yml'
+      - 'CMakeLists.txt'
   pull_request:
     branches: [main]
     paths:
