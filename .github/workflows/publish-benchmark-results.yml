@@ -17,8 +17,9 @@ permissions:
 jobs:
   publish:
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main'
+      github.event.workflow_run.head_branch == 'main' &&
+      (github.event.workflow_run.conclusion == 'success' ||
+       github.event.workflow_run.name == 'One Billion Model A/B')
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -43,6 +44,7 @@ jobs:
           RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
           mkdir -p results
@@ -58,7 +60,11 @@ jobs:
             DEST="results/smollm2-360m-ab"
           elif [ "$WORKFLOW_NAME" = "One Billion Model A/B" ]; then
             SRC="downloaded-evidence/memvanta-oneb-model-ab"
-            DEST="results/tinyllama-1.1b-ab"
+            if [ "$CONCLUSION" = "success" ]; then
+              DEST="results/tinyllama-1.1b-ab"
+            else
+              DEST="results/diagnostics/tinyllama-1.1b-ab-run-${RUN_ID}"
+            fi
           elif [ "$WORKFLOW_NAME" = "RAM Constrained 1B" ]; then
             SRC="downloaded-evidence/memvanta-ram-constrained-1b"
             DEST="results/tinyllama-1.1b-ram-constrained"
@@ -80,7 +86,7 @@ jobs:
           - Run number: $RUN_NUMBER
           - MemVanta commit: $HEAD_SHA
           - Run URL: $RUN_URL
-          - Conclusion: success
+          - Conclusion: $CONCLUSION
           EOF
 
           find "$DEST" -maxdepth 2 -type f -print | sort
