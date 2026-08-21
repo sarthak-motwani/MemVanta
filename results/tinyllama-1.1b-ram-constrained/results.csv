@@ -1,0 +1,15 @@
+runtime,limit_mib,exit_code,result,memory_peak_bytes
+memvanta,1024,2,failed_or_oom,262144
+llama,1024,1,failed_or_oom,339968
+memvanta,896,2,failed_or_oom,516096
+llama,896,1,failed_or_oom,262144
+memvanta,768,2,failed_or_oom,262144
+llama,768,1,failed_or_oom,516096
+memvanta,704,2,failed_or_oom,262144
+llama,704,1,failed_or_oom,262144
+memvanta,640,2,failed_or_oom,262144
+llama,640,1,failed_or_oom,262144
+memvanta,576,2,failed_or_oom,262144
+llama,576,1,failed_or_oom,262144
+memvanta,512,2,failed_or_oom,516096
+llama,512,1,failed_or_oom,262144

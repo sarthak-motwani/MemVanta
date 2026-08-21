@@ -1,0 +1,110 @@
+{
+  "memvanta": {
+    "lowest_success_mib": null,
+    "runs": [
+      {
+        "runtime": "memvanta",
+        "limit_mib": "1024",
+        "exit_code": "2",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "262144"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "896",
+        "exit_code": "2",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "516096"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "768",
+        "exit_code": "2",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "262144"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "704",
+        "exit_code": "2",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "262144"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "640",
+        "exit_code": "2",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "262144"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "576",
+        "exit_code": "2",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "262144"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "512",
+        "exit_code": "2",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "516096"
+      }
+    ]
+  },
+  "llama": {
+    "lowest_success_mib": null,
+    "runs": [
+      {
+        "runtime": "llama",
+        "limit_mib": "1024",
+        "exit_code": "1",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "339968"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "896",
+        "exit_code": "1",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "262144"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "768",
+        "exit_code": "1",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "516096"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "704",
+        "exit_code": "1",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "262144"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "640",
+        "exit_code": "1",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "262144"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "576",
+        "exit_code": "1",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "262144"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "512",
+        "exit_code": "1",
+        "result": "failed_or_oom",
+        "memory_peak_bytes": "262144"
+      }
+    ]
+  }
+}
