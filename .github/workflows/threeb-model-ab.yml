@@ -15,9 +15,9 @@ permissions:
   contents: read
 
 env:
-  HF_REPO: mav23/open_llama_3b_v2-GGUF
-  HF_REV: main
-  MODEL: open_llama_3b_v2.Q4_0.gguf
+  HF_REPO: openlm-research/open_llama_3b_v2
+  MODEL: openllama-3b-v2-q4_0.gguf
+  F16_MODEL: openllama-3b-v2-f16.gguf
   THREADS: 4
   CTX: 768
   PROMPT: 512
@@ -37,7 +37,7 @@ jobs:
   openllama-3b-ab:
     name: OpenLLaMA 3B v2 Q4_0 repeated A/B
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
 
     steps:
       - name: Checkout MemVanta
@@ -46,7 +46,9 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build curl git time ccache python3
+          sudo apt-get install -y build-essential cmake ninja-build curl git time ccache python3 python3-pip
+          python3 -m pip install --break-system-packages --upgrade \
+            huggingface_hub transformers sentencepiece safetensors protobuf numpy
 
       - name: Build MemVanta
         run: |
@@ -57,22 +59,71 @@ jobs:
       - name: Prepare evidence directory
         run: mkdir -p threeb-model-ab
 
-      - name: Download, fingerprint, and validate OpenLLaMA 3B Q4_0
+      - name: Build pinned llama.cpp conversion and benchmark tools
         run: |
           set -euo pipefail
-          MODEL_URL="https://huggingface.co/$HF_REPO/resolve/$HF_REV/$MODEL?download=true"
-          echo "$MODEL_URL" > threeb-model-ab/model-url.txt
-          curl -L --fail --retry 3 --retry-delay 5 "$MODEL_URL" -o "$MODEL"
+          git init llama.cpp
+          git -C llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C llama.cpp fetch --depth 1 origin "$LLAMA_CPP_REF"
+          git -C llama.cpp checkout --detach FETCH_HEAD
+          cmake -S llama.cpp -B llama.cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_CUDA=OFF -DGGML_METAL=OFF -DLLAMA_CURL=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build llama.cpp/build --target llama-bench llama-quantize -j "$(nproc)"
+          git -C llama.cpp rev-parse HEAD | tee threeb-model-ab/llama_cpp_commit.txt
+
+      - name: Resolve and download official OpenLLaMA 3B v2 source
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from huggingface_hub import HfApi, snapshot_download
+          import pathlib, json
+          repo='openlm-research/open_llama_3b_v2'
+          api=HfApi()
+          info=api.model_info(repo)
+          if not info.sha:
+              raise SystemExit('could not resolve source revision')
+          rev=info.sha
+          pathlib.Path('threeb-model-ab/source-revision.txt').write_text(rev+'\n')
+          pathlib.Path('threeb-model-ab/source-metadata.json').write_text(json.dumps({
+              'repo':repo,
+              'revision':rev,
+              'modelId':getattr(info,'modelId',repo),
+          },indent=2)+'\n')
+          snapshot_download(
+              repo_id=repo,
+              revision=rev,
+              local_dir='openllama-source',
+              local_dir_use_symlinks=False,
+          )
+          print('source_revision='+rev)
+          PY
+          du -sh openllama-source | tee threeb-model-ab/source-size.txt
+          find openllama-source -maxdepth 1 -type f -printf '%f\n' | sort > threeb-model-ab/source-files.txt
+
+      - name: Convert official source and quantize Q4_0
+        run: |
+          set -euo pipefail
+          python3 llama.cpp/convert_hf_to_gguf.py openllama-source \
+            --outfile "$F16_MODEL" --outtype f16 \
+            > threeb-model-ab/convert.stdout.txt \
+            2> threeb-model-ab/convert.stderr.txt
+          ./llama.cpp/build/bin/llama-quantize "$F16_MODEL" "$MODEL" Q4_0 \
+            > threeb-model-ab/quantize.stdout.txt \
+            2> threeb-model-ab/quantize.stderr.txt
           sha256sum "$MODEL" | tee threeb-model-ab/model.sha256
           actual_bytes="$(stat -c %s "$MODEL")"
           echo "model_bytes=$actual_bytes" | tee threeb-model-ab/model-size.txt
           test "$actual_bytes" -gt 1500000000
           python3 - <<'PY'
-          import pathlib, struct, json
-          p=pathlib.Path('open_llama_3b_v2.Q4_0.gguf')
+          import pathlib,struct,json
+          p=pathlib.Path('openllama-3b-v2-q4_0.gguf')
           with p.open('rb') as f:
               magic=f.read(4)
-              version=struct.unpack('<I', f.read(4))[0]
+              raw=f.read(4)
+          if len(raw)!=4:
+              raise SystemExit('truncated GGUF header')
+          version=struct.unpack('<I',raw)[0]
           info={'magic':magic.decode('ascii','replace'),'gguf_version':version}
           pathlib.Path('threeb-model-ab/gguf-header.json').write_text(json.dumps(info,indent=2)+'\n')
           print(info)
@@ -81,25 +132,15 @@ jobs:
           if version < 2:
               raise SystemExit(f'obsolete GGUF version {version}; need >= 2')
           PY
-
-      - name: Build pinned llama.cpp CPU tools
-        run: |
-          git init llama.cpp
-          git -C llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
-          git -C llama.cpp fetch --depth 1 origin "$LLAMA_CPP_REF"
-          git -C llama.cpp checkout --detach FETCH_HEAD
-          cmake -S llama.cpp -B llama.cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DGGML_CUDA=OFF -DGGML_METAL=OFF -DLLAMA_CURL=OFF \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cmake --build llama.cpp/build --target llama-bench -j "$(nproc)"
-          git -C llama.cpp rev-parse HEAD | tee threeb-model-ab/llama_cpp_commit.txt
+          rm -f "$F16_MODEL"
+          rm -rf openllama-source
 
       - name: Record provenance
         run: |
           {
             echo "model=$MODEL"
-            echo "hf_repo=$HF_REPO"
-            echo "hf_revision=$HF_REV"
+            echo "source_repo=$HF_REPO"
+            echo -n "source_revision="; cat threeb-model-ab/source-revision.txt
             cat threeb-model-ab/model.sha256
             cat threeb-model-ab/model-size.txt
             cat threeb-model-ab/gguf-header.json
@@ -201,7 +242,7 @@ jobs:
           s['llama_vs_memvanta_tg_speedup']=s['llama_tg']['mean']/s['memvanta_tg']['mean']
           s['memvanta_rss_reduction_pct']=(1-s['memvanta_peak_rss_kib']/s['llama_peak_rss_kib'])*100
           (o/'summary.json').write_text(json.dumps(s,indent=2)+'\n')
-          (o/'SUMMARY.md').write_text(f"# OpenLLaMA 3B v2 Q4_0 — MemVanta vs llama.cpp\n\nSame GGUF, CPU-only, 4 threads, pp512/tg128, context 768, batch 32, F16 KV, 5 repetitions.\n\n- MemVanta pp: {s['memvanta_pp']['mean']:.2f} ± {s['memvanta_pp']['sd']:.2f} tok/s\n- llama.cpp pp: {s['llama_pp']['mean']:.2f} ± {s['llama_pp']['sd']:.2f} tok/s\n- MemVanta tg: {s['memvanta_tg']['mean']:.2f} ± {s['memvanta_tg']['sd']:.2f} tok/s\n- llama.cpp tg: {s['llama_tg']['mean']:.2f} ± {s['llama_tg']['sd']:.2f} tok/s\n- MemVanta peak RSS: {s['memvanta_peak_rss_kib']} KiB\n- llama.cpp peak RSS: {s['llama_peak_rss_kib']} KiB\n- MemVanta RSS reduction: {s['memvanta_rss_reduction_pct']:.2f}%\n")
+          (o/'SUMMARY.md').write_text(f"# OpenLLaMA 3B v2 Q4_0 — MemVanta vs llama.cpp\n\nGenerated from the pinned official OpenLLaMA source revision, then benchmarked as the exact same GGUF on both runtimes. CPU-only, 4 threads, pp512/tg128, context 768, batch 32, F16 KV, 5 repetitions.\n\n- MemVanta pp: {s['memvanta_pp']['mean']:.2f} ± {s['memvanta_pp']['sd']:.2f} tok/s\n- llama.cpp pp: {s['llama_pp']['mean']:.2f} ± {s['llama_pp']['sd']:.2f} tok/s\n- MemVanta tg: {s['memvanta_tg']['mean']:.2f} ± {s['memvanta_tg']['sd']:.2f} tok/s\n- llama.cpp tg: {s['llama_tg']['mean']:.2f} ± {s['llama_tg']['sd']:.2f} tok/s\n- MemVanta peak RSS: {s['memvanta_peak_rss_kib']} KiB\n- llama.cpp peak RSS: {s['llama_peak_rss_kib']} KiB\n- MemVanta RSS reduction: {s['memvanta_rss_reduction_pct']:.2f}%\n")
           print((o/'SUMMARY.md').read_text())
           PY
 
