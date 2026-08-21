@@ -17,14 +17,11 @@ std::vector<BlockQ4_0> quantize_q4_0(const float* src, std::size_t n);
 float dot_q8_0(const BlockQ8_0* a, const float* x, std::size_t n);
 float dot_q4_0(const BlockQ4_0* a, const float* x, std::size_t n);
 float dot_q4_q8(const BlockQ4_0* a, const BlockQ8_0* x, std::size_t n);
-float dot_q8_0_fast(const BlockQ8_0* a, const float* x, std::size_t n);
 unsigned effective_kernel_threads(std::size_t rows, std::size_t cols,
                                   unsigned requested,
                                   std::size_t min_work_per_thread=32768);
 void matvec_q8_0(const BlockQ8_0* A, const float* x, float* y,
                  std::size_t rows, std::size_t cols, unsigned threads=1);
-void matvec_q8_0_fast(const BlockQ8_0* A, const float* x, float* y,
-                      std::size_t rows, std::size_t cols, unsigned threads=1);
 void matvec_q4_0(const BlockQ4_0* A, const float* x, float* y,
                  std::size_t rows, std::size_t cols, unsigned threads=1);
 void matvec_q4_q8(const BlockQ4_0* A, const BlockQ8_0* x, float* y,
