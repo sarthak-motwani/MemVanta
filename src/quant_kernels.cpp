@@ -6,9 +6,6 @@
 #if defined(MEMVANTA_USE_OPENMP)
 #include <omp.h>
 #endif
-#if defined(__AVX2__)
-#include <immintrin.h>
-#endif
 
 namespace memvanta {
 namespace {
@@ -38,16 +35,6 @@ void parallel_rows(std::size_t rows, unsigned threads, Fn fn) {
     for (auto& th : pool) th.join();
 #endif
 }
-#if defined(__AVX2__)
-inline float hsum256_ps(__m256 v) {
-    __m128 lo = _mm256_castps256_ps128(v);
-    __m128 hi = _mm256_extractf128_ps(v, 1);
-    __m128 s = _mm_add_ps(lo, hi);
-    s = _mm_hadd_ps(s, s);
-    s = _mm_hadd_ps(s, s);
-    return _mm_cvtss_f32(s);
-}
-#endif
 }
 
 unsigned effective_kernel_threads(std::size_t rows, std::size_t cols,
@@ -60,38 +47,6 @@ unsigned effective_kernel_threads(std::size_t rows, std::size_t cols,
     const std::size_t useful = min_work_per_thread ? work / min_work_per_thread : requested;
     return std::max(1u, std::min<unsigned>(requested,
         static_cast<unsigned>(std::min<std::size_t>(std::max<std::size_t>(1,useful), rows))));
-}
-
-float dot_q8_0_fast(const BlockQ8_0* a, const float* x, std::size_t n) {
-    if (n % QK) throw std::runtime_error("q8_0 fast length must be multiple of 32");
-    const std::size_t nb = n / QK;
-    float sum = 0.0f;
-    for (std::size_t b=0; b<nb; ++b) {
-#if defined(__AVX2__)
-        __m256 acc = _mm256_setzero_ps();
-        for (int k=0; k<32; k+=8) {
-            const __m128i q8 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(a[b].qs+k));
-            const __m256i qi = _mm256_cvtepi8_epi32(q8);
-            acc = _mm256_fmadd_ps(_mm256_cvtepi32_ps(qi), _mm256_loadu_ps(x+b*QK+k), acc);
-        }
-        sum += hsum256_ps(acc) * a[b].d;
-#else
-        float s = 0.0f;
-        for (std::size_t k=0; k<QK; ++k) s += static_cast<float>(a[b].qs[k]) * x[b*QK+k];
-        sum += s * a[b].d;
-#endif
-    }
-    return sum;
-}
-
-void matvec_q8_0_fast(const BlockQ8_0* A, const float* x, float* y,
-                      std::size_t rows, std::size_t cols, unsigned threads) {
-    if (cols % QK) throw std::runtime_error("q8_0 fast cols must be multiple of 32");
-    const std::size_t bpr = cols / QK;
-    const unsigned use_threads = effective_kernel_threads(rows, cols, threads);
-    parallel_rows(rows, use_threads, [&](std::size_t r0, std::size_t r1){
-        for (std::size_t r=r0; r<r1; ++r) y[r] = dot_q8_0_fast(A+r*bpr, x, cols);
-    });
 }
 
 float dot_q4_q8(const BlockQ4_0* a, const BlockQ8_0* x, std::size_t n) {
