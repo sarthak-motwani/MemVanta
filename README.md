@@ -2,14 +2,14 @@
 
 [![Build](https://github.com/sauravsingla/MemVanta/actions/workflows/ci.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/ci.yml)
 [![7B A/B](https://github.com/sauravsingla/MemVanta/actions/workflows/sevenb-model-ab.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/sevenb-model-ab.yml)
-[![RAM Constrained 1B](https://github.com/sauravsingla/MemVanta/actions/workflows/ram-constrained.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/ram-constrained.yml)
+[![RAM Constrained 7B](https://github.com/sauravsingla/MemVanta/actions/workflows/sevenb-ram-constrained.yml/badge.svg)](https://github.com/sauravsingla/MemVanta/actions/workflows/sevenb-ram-constrained.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **Memory-efficient CPU LLM inference for GGUF models.**
 
 MemVanta is an experimental C++20 inference runtime for **quantized GGUF language models on CPUs**, designed for systems where **RAM is the constraint**. It explores mmap-backed model access, bounded caching, quantized kernels, paged KV cache, and reproducible memory-pressure benchmarking.
 
-> **OpenLLaMA 7B v2 Q4_0:** MemVanta used **47.50% less peak RSS** than pinned llama.cpp on the exact same GGUF across 5 measured CPU runs. llama.cpp remained substantially faster, so this is a **memory-efficiency result, not a throughput win**.
+> **OpenLLaMA 7B v2 Q4_0:** MemVanta used **47.50% less peak RSS** than pinned llama.cpp on the exact same GGUF across 5 measured CPU runs. Under a separate cgroup-v2 memory sweep with swap disabled, MemVanta completed at a **3584 MiB tested ceiling** where llama.cpp was **OOM-killed**. llama.cpp remains substantially faster, so this is a **memory-efficiency result, not a throughput win**.
 
 ## Who is this for?
 
@@ -37,11 +37,18 @@ It is **not yet a drop-in replacement for llama.cpp** or a polished end-user cha
 
 Raw evidence: [`results/openllama-7b-v2-ab/`](results/openllama-7b-v2-ab/)
 
-### Memory-pressure proof
+### 7B memory-pressure proof
 
-In a separate TinyLlama 1.1B cgroup-v2 test with swap disabled, MemVanta completed at a **512 MiB tested memory ceiling**, while pinned llama.cpp was OOM-killed at 576 MiB and 512 MiB; llama.cpp's lowest successful tested ceiling was 640 MiB.
+In a separate Linux cgroup-v2 `MemoryMax` sweep with swap disabled, using the **exact same OpenLLaMA 7B v2 Q4_0 GGUF**, CPU-only, 4 threads, pp128/tg32, context 768, batch 32, and F16 KV:
 
-Raw evidence: [`results/tinyllama-1.1b-ram-constrained/`](results/tinyllama-1.1b-ram-constrained/)
+- MemVanta completed at a **3584 MiB tested memory ceiling**.
+- pinned llama.cpp was **OOM-killed at 3584 MiB**.
+- llama.cpp's lowest successful **tested** ceiling was **3840 MiB**.
+- tested-ceiling difference: **256 MiB (6.67%)**.
+
+This is an execution-under-pressure result over the tested sweep, **not an exact minimum physical-RAM requirement**.
+
+Raw evidence: [`results/openllama-7b-v2-ram-constrained/`](results/openllama-7b-v2-ram-constrained/)
 
 ## What MemVanta implements
 
@@ -83,8 +90,9 @@ ctest --test-dir build --output-on-failure
 Published runs preserve raw evidence instead of relying only on transient CI logs.
 
 - [`results/openllama-7b-v2-ab/`](results/openllama-7b-v2-ab/) — 7B repeated exact-same-GGUF A/B
+- [`results/openllama-7b-v2-ram-constrained/`](results/openllama-7b-v2-ram-constrained/) — 7B constrained-memory sweep
 - [`results/openllama-3b-v2-ab/`](results/openllama-3b-v2-ab/) — 3B repeated same-GGUF A/B
-- [`results/tinyllama-1.1b-ram-constrained/`](results/tinyllama-1.1b-ram-constrained/) — constrained-memory sweep
+- [`results/tinyllama-1.1b-ram-constrained/`](results/tinyllama-1.1b-ram-constrained/) — 1.1B constrained-memory sweep
 - [`results/tinyllama-1.1b-ab/`](results/tinyllama-1.1b-ab/) — 1.1B repeated A/B
 - [`results/smollm2-360m-ab/`](results/smollm2-360m-ab/) — 360M repeated A/B
 
@@ -94,7 +102,7 @@ The goal is simple:
 
 > **Run larger quantized LLMs within smaller RAM budgets on commodity CPUs.**
 
-Current work is focused on **7B constrained-memory boundaries, physical-CPU reproduction, numerical validation, and throughput optimization**.
+Current work is focused on **tightening the 7B minimum successful boundary, physical-CPU reproduction, numerical validation, and throughput optimization**.
 
 MemVanta is an **engineering prototype under active development**. Published trained-model evidence now reaches 7B and consistently shows lower peak RSS on the tested workloads; it does not establish a universal scaling law or throughput advantage.
 
