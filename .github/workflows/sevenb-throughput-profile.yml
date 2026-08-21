@@ -1,0 +1,117 @@
+name: Seven Billion Throughput Profile
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sevenb-throughput-profile.yml'
+      - 'benchmarks/profile_bench.cpp'
+      - 'src/gguf_kernels.cpp'
+      - 'src/llama_model.cpp'
+      - 'include/memvanta/gguf_kernels.hpp'
+
+permissions:
+  contents: read
+
+env:
+  MODEL: openlm-research-open_llama_7b_v2-Q4_0.gguf
+  MODEL_URL: https://huggingface.co/maddes8cht/openlm-research-open_llama_7b_v2-gguf/resolve/main/openlm-research-open_llama_7b_v2-Q4_0.gguf?download=true
+  MODEL_SHA256: 892f6e2e840ed98bb7bc1d74da67ae0cca52b2d90b0316d0a7e66a37a5a60760
+  THREADS: 4
+  CTX: 256
+  PROMPT: 128
+  GEN: 16
+  BATCH: 32
+  OMP_NUM_THREADS: 4
+  OMP_DYNAMIC: 'FALSE'
+  OMP_PROC_BIND: close
+  OMP_PLACES: cores
+  MALLOC_ARENA_MAX: 2
+
+jobs:
+  profile-7b:
+    name: OpenLLaMA 7B throughput hotspot profile
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl time ccache
+
+      - name: Build MemVanta profile target
+        run: |
+          cmake -S . -B build-profile -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-profile --target memvanta_profile memvanta_tests -j "$(nproc)"
+          ctest --test-dir build-profile --output-on-failure
+
+      - name: Download and verify exact 7B GGUF
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 --retry-delay 3 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+          mkdir -p sevenb-throughput-profile
+          sha256sum "$MODEL" > sevenb-throughput-profile/model.sha256
+          stat -c 'model_bytes=%s' "$MODEL" > sevenb-throughput-profile/model-size.txt
+
+      - name: Record environment
+        run: |
+          {
+            echo "model=$MODEL"
+            cat sevenb-throughput-profile/model.sha256
+            cat sevenb-throughput-profile/model-size.txt
+            echo "memvanta_commit=$GITHUB_SHA"
+            echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=f16"
+            uname -a
+            lscpu
+            free -h
+          } > sevenb-throughput-profile/environment.txt
+
+      - name: Profile trained 7B execution
+        run: |
+          set -euo pipefail
+          /usr/bin/time -v ./build-profile/memvanta_profile \
+            --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
+            --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" \
+            --csv sevenb-throughput-profile/layer-profile.csv \
+            > sevenb-throughput-profile/profile.txt \
+            2> sevenb-throughput-profile/time.txt
+          cat sevenb-throughput-profile/profile.txt
+
+      - name: Summarize hotspots
+        run: |
+          python3 - <<'PY'
+          import pathlib,re,json
+          o=pathlib.Path('sevenb-throughput-profile')
+          text=(o/'profile.txt').read_text()
+          keys=['prefill_ms','decode_total_ms','sampling_ms','qkv_projection_ms','attention_output_projection_ms','ffn_gemm_ms','output_head_ms','non_gemm_core_ms']
+          vals={}
+          for k in keys:
+              m=re.search(rf'\b{k}=([0-9.]+)',text)
+              vals[k]=float(m.group(1)) if m else None
+          components={k:v for k,v in vals.items() if k in ['qkv_projection_ms','attention_output_projection_ms','ffn_gemm_ms','output_head_ms','non_gemm_core_ms'] and v is not None}
+          total=sum(components.values()) or 1.0
+          ranked=sorted(components.items(),key=lambda x:x[1],reverse=True)
+          summary={'benchmark':'OpenLLaMA 7B v2 trained-model throughput hotspot profile','values_ms':vals,'ranked_components':[{'component':k,'ms':v,'pct_profiled':100*v/total} for k,v in ranked]}
+          (o/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
+          lines=['# OpenLLaMA 7B v2 throughput profile','', 'Exact verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg16, batch 32, F16 KV.','']
+          for x in summary['ranked_components']:
+              lines.append(f"- {x['component']}: {x['ms']:.2f} ms ({x['pct_profiled']:.1f}% of profiled component time)")
+          lines += ['', 'This profile is for hotspot selection, not a throughput comparison claim.']
+          (o/'SUMMARY.md').write_text('\n'.join(lines)+'\n')
+          print((o/'SUMMARY.md').read_text())
+          PY
+
+      - name: Upload profile evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memvanta-sevenb-throughput-profile
+          path: sevenb-throughput-profile/**
+          if-no-files-found: error
+          retention-days: 30
