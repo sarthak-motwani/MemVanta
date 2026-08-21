@@ -1,0 +1,40 @@
+{
+  "benchmark": "OpenLLaMA 7B v2 trained-model throughput hotspot profile",
+  "values_ms": {
+    "prefill_ms": 46100.5,
+    "decode_total_ms": 11400.4,
+    "sampling_ms": 0.345277,
+    "qkv_projection_ms": 13305.92,
+    "attention_output_projection_ms": 4432.8,
+    "ffn_gemm_ms": 35677.82,
+    "output_head_ms": 3047.76,
+    "non_gemm_core_ms": 1036.2
+  },
+  "ranked_components": [
+    {
+      "component": "ffn_gemm_ms",
+      "ms": 35677.82,
+      "pct_profiled": 62.04784306223424
+    },
+    {
+      "component": "qkv_projection_ms",
+      "ms": 13305.92,
+      "pct_profiled": 23.140529212789453
+    },
+    {
+      "component": "attention_output_projection_ms",
+      "ms": 4432.8,
+      "pct_profiled": 7.709150355214303
+    },
+    {
+      "component": "output_head_ms",
+      "ms": 3047.76,
+      "pct_profiled": 5.3004060834253615
+    },
+    {
+      "component": "non_gemm_core_ms",
+      "ms": 1036.2,
+      "pct_profiled": 1.8020712863366406
+    }
+  ]
+}
