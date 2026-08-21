@@ -1,0 +1,1 @@
+https://huggingface.co/klosax/openllama-3b-v2-gguf/resolve/ab010e7a11732f21baf74675c61f6482f65232f4/openllama-3b-v2-q4_0.gguf?download=true

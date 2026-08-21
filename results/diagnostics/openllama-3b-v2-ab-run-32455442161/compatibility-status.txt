@@ -1,0 +1,4 @@
+tokenizer_rc=1
+generation_rc=2
+memvanta_micro_rc=2
+llama_micro_rc=1
