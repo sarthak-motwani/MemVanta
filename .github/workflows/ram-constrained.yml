@@ -2,6 +2,10 @@ name: RAM Constrained 1B
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ram-constrained.yml'
   workflow_run:
     workflows:
       - One Billion Model A/B
@@ -11,7 +15,9 @@ permissions:
   contents: read
 
 env:
-  HF_REPO: QuantFactory/TinyLlama-1.1B-Chat-v1.0-GGUF
+  MODEL: TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf
+  MODEL_URL: https://huggingface.co/QuantFactory/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf?download=true
+  MODEL_SHA256: 58d7f78ad80e6745d2148dc7391740c2de761da5791c853dec9a09b1f43a1ea9
   THREADS: 4
   CTX: 768
   PROMPT: 128
@@ -24,6 +30,7 @@ jobs:
   constrained-memory:
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     name: TinyLlama 1.1B constrained-memory comparison
     runs-on: ubuntu-latest
@@ -46,20 +53,12 @@ jobs:
           cmake --build build-ram -j "$(nproc)"
           ctest --test-dir build-ram --output-on-failure
 
-      - name: Resolve and download Q4_0 GGUF
+      - name: Download and verify TinyLlama 1.1B Q4_0
         run: |
-          python3 - <<'PY' > model-name.txt
-          import json, urllib.request
-          repo='QuantFactory/TinyLlama-1.1B-Chat-v1.0-GGUF'
-          d=json.load(urllib.request.urlopen('https://huggingface.co/api/models/'+repo))
-          xs=[x['rfilename'] for x in d.get('siblings',[]) if x['rfilename'].lower().endswith('q4_0.gguf')]
-          if len(xs)!=1: raise SystemExit(f'expected one Q4_0 GGUF, found {xs}')
-          print(xs[0])
-          PY
-          MODEL="$(cat model-name.txt)"
-          echo "MODEL=$MODEL" >> "$GITHUB_ENV"
-          curl -L --fail --retry 3 --retry-delay 3 "https://huggingface.co/$HF_REPO/resolve/main/$MODEL?download=true" -o "$MODEL"
+          curl -L --fail --retry 3 --retry-delay 3 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c - | tee model-sha-check.txt
           sha256sum "$MODEL" | tee model.sha256
+          stat -c 'model_bytes=%s' "$MODEL" | tee model-size.txt
 
       - name: Build pinned llama.cpp CPU tools
         run: |
@@ -77,44 +76,67 @@ jobs:
           test -d /sys/fs/cgroup
           grep -qw memory /sys/fs/cgroup/cgroup.controllers
           systemctl --version | head -n 1
+          test -n "$GITHUB_WORKSPACE"
 
       - name: Run constrained-memory sweep
         run: |
+          set -euo pipefail
           mkdir -p ram-constrained
+          LIMITS="1536 1280 1152 1024 896 768 704 640 576 512"
           {
             echo "model=$MODEL"
             cat model.sha256
             echo "memvanta_commit=$GITHUB_SHA"
             echo "llama_cpp_ref=$LLAMA_CPP_REF"
             echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=$KV"
-            echo "limits_mib=1024,896,768,704,640,576,512"
+            echo "limits_mib=$(echo "$LIMITS" | tr ' ' ',')"
+            echo "cgroup=v2 systemd-run MemoryMax with MemorySwapMax=0"
             uname -a
             lscpu
             free -h
           } > ram-constrained/environment.txt
 
-          echo 'runtime,limit_mib,exit_code,result,memory_peak_bytes' > ram-constrained/results.csv
+          echo 'runtime,limit_mib,launcher_exit,exec_exit,result,memory_peak_bytes,service_result' > ram-constrained/results.csv
 
           run_limited() {
             runtime="$1"; limit="$2"; shift 2
             unit="memvanta-${runtime}-${limit}-${GITHUB_RUN_ID}"
             out="ram-constrained/${runtime}-${limit}.stdout.txt"
             err="ram-constrained/${runtime}-${limit}.stderr.txt"
+
             set +e
-            sudo systemd-run --quiet --wait --unit="$unit" \
-              -p "MemoryMax=${limit}M" -p MemorySwapMax=0 \
-              "$@" >"$out" 2>"$err"
-            rc=$?
+            sudo systemd-run --quiet --wait --pipe --unit="$unit" \
+              -p "MemoryMax=${limit}M" \
+              -p MemorySwapMax=0 \
+              /usr/bin/env -C "$GITHUB_WORKSPACE" "$@" >"$out" 2>"$err"
+            launch_rc=$?
             set -e
-            peak="$(sudo systemctl show "$unit" -p MemoryPeak --value 2>/dev/null || true)"
-            result=success
-            if [ "$rc" -ne 0 ]; then result=failed_or_oom; fi
-            echo "$runtime,$limit,$rc,$result,${peak:-unknown}" >> ram-constrained/results.csv
-            sudo systemctl reset-failed "$unit" >/dev/null 2>&1 || true
-            sudo systemctl stop "$unit" >/dev/null 2>&1 || true
+
+            exec_rc="$(sudo systemctl show "${unit}.service" -p ExecMainStatus --value 2>/dev/null || true)"
+            service_result="$(sudo systemctl show "${unit}.service" -p Result --value 2>/dev/null || true)"
+            peak="$(sudo systemctl show "${unit}.service" -p MemoryPeak --value 2>/dev/null || true)"
+
+            result=failed
+            if [ "$launch_rc" -eq 0 ] && [ "${exec_rc:-0}" -eq 0 ] && { [ -z "$service_result" ] || [ "$service_result" = success ]; }; then
+              result=success
+            elif [ "$service_result" = oom-kill ]; then
+              result=oom
+            fi
+
+            echo "$runtime,$limit,$launch_rc,${exec_rc:-unknown},$result,${peak:-unknown},${service_result:-unknown}" >> ram-constrained/results.csv
+            {
+              echo
+              echo "launcher_exit=$launch_rc"
+              echo "exec_exit=${exec_rc:-unknown}"
+              echo "service_result=${service_result:-unknown}"
+              echo "memory_peak_bytes=${peak:-unknown}"
+            } >> "$err"
+
+            sudo systemctl reset-failed "${unit}.service" >/dev/null 2>&1 || true
+            sudo systemctl stop "${unit}.service" >/dev/null 2>&1 || true
           }
 
-          for limit in 1024 896 768 704 640 576 512; do
+          for limit in $LIMITS; do
             run_limited memvanta "$limit" ./build-ram/memvanta_real_bench \
               --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
               --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" --kv "$KV" \
@@ -125,30 +147,44 @@ jobs:
           done
           cat ram-constrained/results.csv
 
-      - name: Summarize constrained-memory boundary
+      - name: Summarize and validate constrained-memory boundary
         run: |
           python3 - <<'PY'
-          import csv,pathlib,json
+          import csv, pathlib, json
           o=pathlib.Path('ram-constrained')
           rows=list(csv.DictReader((o/'results.csv').open()))
           summary={}
           for rt in ('memvanta','llama'):
-            rs=[r for r in rows if r['runtime']==rt]
-            ok=[int(r['limit_mib']) for r in rs if r['result']=='success']
-            summary[rt]={'lowest_success_mib':min(ok) if ok else None,'runs':rs}
-          a=summary['memvanta']['lowest_success_mib']; b=summary['llama']['lowest_success_mib']
-          if a is not None and b is not None: summary['lowest_success_difference_mib']=b-a
+              rs=[r for r in rows if r['runtime']==rt]
+              ok=[int(r['limit_mib']) for r in rs if r['result']=='success']
+              summary[rt]={'lowest_success_mib':min(ok) if ok else None,'runs':rs}
+          a=summary['memvanta']['lowest_success_mib']
+          b=summary['llama']['lowest_success_mib']
+          if a is not None and b is not None:
+              summary['lowest_success_difference_mib']=b-a
+              summary['memvanta_boundary_reduction_pct']=(1-a/b)*100
           (o/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
-          lines=['# TinyLlama 1.1B RAM-constrained experiment','', 'Linux cgroup-v2 MemoryMax sweep with swap disabled. Same Q4_0 GGUF, CPU-only, 4 threads, pp128/tg32, context 768, batch 32, F16 KV.','']
-          lines += [f"- MemVanta lowest successful limit: {a if a is not None else 'none'} MiB", f"- llama.cpp lowest successful limit: {b if b is not None else 'none'} MiB"]
-          if a is not None and b is not None: lines.append(f"- Boundary difference: {b-a} MiB")
+          lines=[
+              '# TinyLlama 1.1B RAM-constrained experiment','',
+              'Linux cgroup-v2 `MemoryMax` sweep with swap disabled. Same Q4_0 GGUF, CPU-only, 4 threads, pp128/tg32, context 768, batch 32, F16 KV.','',
+              f"- MemVanta lowest successful limit: {a if a is not None else 'none'} MiB",
+              f"- llama.cpp lowest successful limit: {b if b is not None else 'none'} MiB",
+          ]
+          if a is not None and b is not None:
+              lines.append(f"- Boundary difference: {b-a} MiB")
+              lines.append(f"- MemVanta lower successful memory ceiling: {summary['memvanta_boundary_reduction_pct']:.2f}%")
           lines += ['', 'This is an execution-under-pressure boundary test, not a throughput benchmark. Full per-limit outcomes are in `results.csv`.']
           (o/'SUMMARY.md').write_text('\n'.join(lines)+'\n')
           print((o/'SUMMARY.md').read_text())
+          if a is None or b is None:
+              raise SystemExit('invalid constrained-memory evidence: both runtimes must establish at least one successful baseline')
           PY
 
-      - name: Preserve model hash
-        run: cp model.sha256 ram-constrained/
+      - name: Preserve model provenance
+        run: |
+          cp model.sha256 ram-constrained/
+          cp model-sha-check.txt ram-constrained/
+          cp model-size.txt ram-constrained/
 
       - name: Upload constrained-memory evidence
         if: always()
