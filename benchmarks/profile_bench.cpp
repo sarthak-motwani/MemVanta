@@ -38,9 +38,9 @@ int main(int argc,char**argv){
         int cur=ids.empty()?0:ids.back();double sampling_ms=0.0;
         for(std::size_t i=0;i<gen_n;++i){const auto&logits=m.forward(cur,true);auto s0=Clock::now();cur=greedy.sample(logits);auto s1=Clock::now();sampling_ms+=std::chrono::duration<double,std::milli>(s1-s0).count();}
         const auto c2=read_cycles();auto t2=Clock::now();memvanta::enable_kernel_profiling(false);
-        auto entries=memvanta::kernel_profile_snapshot();std::ofstream f(csv);f<<"layer,kind,tensor,batch,calls,ms\n";
+        auto entries=memvanta::kernel_profile_snapshot();std::ofstream f(csv);f<<"layer,kind,tensor,type,cols,rows,batch,calls,ms\n";
         std::map<std::pair<int,memvanta::KernelProfileKind>,double> agg;double kernel_ms=0;
-        for(const auto&e:entries){f<<e.layer<<','<<memvanta::kernel_profile_kind_name(e.kind)<<','<<e.tensor<<','<<e.batch<<','<<e.calls<<','<<std::fixed<<std::setprecision(6)<<e.ms<<'\n';agg[{e.layer,e.kind}]+=e.ms;kernel_ms+=e.ms;}
+        for(const auto&e:entries){const auto&t=m.gguf().tensor(e.tensor);f<<e.layer<<','<<memvanta::kernel_profile_kind_name(e.kind)<<','<<e.tensor<<','<<memvanta::ggml_type_name(t.type)<<','<<t.ne(0)<<','<<t.ne(1)<<','<<e.batch<<','<<e.calls<<','<<std::fixed<<std::setprecision(6)<<e.ms<<'\n';agg[{e.layer,e.kind}]+=e.ms;kernel_ms+=e.ms;}
         const double prefill_ms=std::chrono::duration<double,std::milli>(t1-t0).count();const double decode_total_ms=std::chrono::duration<double,std::milli>(t2-t1).count();const double model_total_ms=std::chrono::duration<double,std::milli>(t2-t0).count();
         double qkv=0,attn_proj=0,ffn=0,output=0;for(auto&[k,v]:agg){switch(k.second){case memvanta::KernelProfileKind::QProj:case memvanta::KernelProfileKind::KProj:case memvanta::KernelProfileKind::VProj:qkv+=v;break;case memvanta::KernelProfileKind::OProj:attn_proj+=v;break;case memvanta::KernelProfileKind::FfnGate:case memvanta::KernelProfileKind::FfnUp:case memvanta::KernelProfileKind::FfnDown:ffn+=v;break;case memvanta::KernelProfileKind::Output:output+=v;break;default:break;}}
         const double residual=std::max(0.0,model_total_ms-kernel_ms-sampling_ms);
