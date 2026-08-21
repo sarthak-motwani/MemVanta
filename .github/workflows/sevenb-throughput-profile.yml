@@ -44,10 +44,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build curl time ccache
 
+      - name: Prepare profile evidence directory
+        run: mkdir -p sevenb-throughput-profile
+
       - name: Build MemVanta profile target
         run: |
           cmake -S . -B build-profile -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cmake --build build-profile --target memvanta_profile memvanta_tests -j "$(nproc)"
+          cmake --build build-profile --target memvanta_profile memvanta_tests memvanta_tokenizer_tests -j "$(nproc)"
           ctest --test-dir build-profile --output-on-failure
 
       - name: Download and verify exact 7B GGUF
@@ -55,7 +58,6 @@ jobs:
           set -euo pipefail
           curl -L --fail --retry 3 --retry-delay 3 "$MODEL_URL" -o "$MODEL"
           echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
-          mkdir -p sevenb-throughput-profile
           sha256sum "$MODEL" > sevenb-throughput-profile/model.sha256
           stat -c 'model_bytes=%s' "$MODEL" > sevenb-throughput-profile/model-size.txt
 
