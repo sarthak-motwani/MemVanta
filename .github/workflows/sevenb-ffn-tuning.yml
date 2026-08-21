@@ -1,5 +1,6 @@
 name: Seven Billion FFN Tuning
 
+# Evidence from successful runs is published under results/openllama-7b-v2-ffn-tuning.
 on:
   workflow_dispatch:
   push:
