@@ -39,6 +39,46 @@ void parallel_rows(std::size_t rows, unsigned threads, Fn fn) {
     for (auto &th : pool) th.join();
 #endif
 }
+
+#if defined(__AVX2__)
+inline float hsum256_ps(__m256 v) {
+    __m128 lo = _mm256_castps256_ps128(v);
+    __m128 hi = _mm256_extractf128_ps(v, 1);
+    __m128 s = _mm_add_ps(lo, hi);
+    s = _mm_hadd_ps(s, s);
+    s = _mm_hadd_ps(s, s);
+    return _mm_cvtss_f32(s);
+}
+#endif
+
+inline void dot_q8_0_pair(const BlockQ8_0* a0, const BlockQ8_0* a1,
+                          const float* x, std::size_t n,
+                          float& out0, float& out1) {
+#if defined(__AVX2__)
+    const std::size_t nb = n/QK;
+    float sum0 = 0.0f, sum1 = 0.0f;
+    for (std::size_t b=0; b<nb; ++b) {
+        __m256 acc0 = _mm256_setzero_ps();
+        __m256 acc1 = _mm256_setzero_ps();
+        for (int k=0; k<32; k+=8) {
+            const __m256 xv = _mm256_loadu_ps(x+b*QK+k);
+            const __m128i q80 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(a0[b].qs+k));
+            const __m128i q81 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(a1[b].qs+k));
+            const __m256 qf0 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(q80));
+            const __m256 qf1 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(q81));
+            acc0 = _mm256_fmadd_ps(qf0, xv, acc0);
+            acc1 = _mm256_fmadd_ps(qf1, xv, acc1);
+        }
+        sum0 += hsum256_ps(acc0) * a0[b].d;
+        sum1 += hsum256_ps(acc1) * a1[b].d;
+    }
+    out0 = sum0;
+    out1 = sum1;
+#else
+    out0 = dot_q8_0(a0, x, n);
+    out1 = dot_q8_0(a1, x, n);
+#endif
+}
 }
 
 std::vector<BlockQ8_0> quantize_q8_0(const float* src, std::size_t n) {
@@ -117,8 +157,6 @@ float dot_q4_0(const BlockQ4_0* a, const float* x, std::size_t n) {
         const __m128i mask = _mm_set1_epi8(0x0f);
         const __m128i lo = _mm_and_si128(packed, mask);
         const __m128i hi = _mm_and_si128(_mm_srli_epi16(packed, 4), mask);
-        // Stored as [q0|q1<<4, q2|q3<<4, ...]. Interleave low/high nibbles
-        // back to q0,q1,...,q31, then convert signed values in [-8,7].
         const __m128i u0 = _mm_unpacklo_epi8(lo, hi);
         const __m128i u1 = _mm_unpackhi_epi8(lo, hi);
         const __m128i bias = _mm_set1_epi8(8);
@@ -161,6 +199,23 @@ void matvec_q8_0(const BlockQ8_0* A, const float* x, float* y,
     const std::size_t bpr = cols/QK;
     parallel_rows(rows, threads, [&](std::size_t r0, std::size_t r1){
         for (std::size_t r=r0;r<r1;++r) y[r] = dot_q8_0(A+r*bpr, x, cols);
+    });
+}
+
+void matvec_q8_0_rowpair(const BlockQ8_0* A, const float* x, float* y,
+                         std::size_t rows, std::size_t cols, unsigned threads) {
+    if (cols % QK) throw std::runtime_error("q8_0 cols must be multiple of 32");
+    const std::size_t bpr = cols/QK;
+    const std::size_t pairs = (rows+1)/2;
+    parallel_rows(pairs, threads, [&](std::size_t p0, std::size_t p1){
+        for (std::size_t p=p0; p<p1; ++p) {
+            const std::size_t r = 2*p;
+            if (r+1 < rows) {
+                dot_q8_0_pair(A+r*bpr, A+(r+1)*bpr, x, cols, y[r], y[r+1]);
+            } else {
+                y[r] = dot_q8_0(A+r*bpr, x, cols);
+            }
+        }
     });
 }
 
