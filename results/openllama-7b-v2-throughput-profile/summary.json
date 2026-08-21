@@ -1,40 +1,40 @@
 {
   "benchmark": "OpenLLaMA 7B v2 trained-model throughput hotspot profile",
   "values_ms": {
-    "prefill_ms": 47282.6,
-    "decode_total_ms": 11415.6,
-    "sampling_ms": 0.363111,
-    "qkv_projection_ms": 13751.7,
-    "attention_output_projection_ms": 4572.11,
-    "ffn_gemm_ms": 36277.38,
-    "output_head_ms": 3051.22,
-    "non_gemm_core_ms": 1045.37
+    "prefill_ms": 45839.7,
+    "decode_total_ms": 11474.7,
+    "sampling_ms": 0.358512,
+    "qkv_projection_ms": 13205.83,
+    "attention_output_projection_ms": 4436.66,
+    "ffn_gemm_ms": 35601.44,
+    "output_head_ms": 3044.52,
+    "non_gemm_core_ms": 1025.59
   },
   "ranked_components": [
     {
       "component": "ffn_gemm_ms",
-      "ms": 36277.38,
-      "pct_profiled": 61.80366616931679
+      "ms": 35601.44,
+      "pct_profiled": 62.11643778732052
     },
     {
       "component": "qkv_projection_ms",
-      "ms": 13751.7,
-      "pct_profiled": 23.427972914818927
+      "ms": 13205.83,
+      "pct_profiled": 23.041178042936775
     },
     {
       "component": "attention_output_projection_ms",
-      "ms": 4572.11,
-      "pct_profiled": 7.789238366425441
+      "ms": 4436.66,
+      "pct_profiled": 7.740965389981233
     },
     {
       "component": "output_head_ms",
-      "ms": 3051.22,
-      "pct_profiled": 5.198186370932597
+      "ms": 3044.52,
+      "pct_profiled": 5.311996851033359
     },
     {
       "component": "non_gemm_core_ms",
-      "ms": 1045.37,
-      "pct_profiled": 1.7809361785062396
+      "ms": 1025.59,
+      "pct_profiled": 1.789421928728109
     }
   ]
 }
