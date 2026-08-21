@@ -1,0 +1,1 @@
+error: unsupported matvec tensor type Q6_K: output.weight
