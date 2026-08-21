@@ -23,6 +23,7 @@ env:
   PROMPT: 128
   GEN: 16
   BATCH: 32
+  PROFILE_SCHEMA: 1
   OMP_NUM_THREADS: 4
   OMP_DYNAMIC: 'FALSE'
   OMP_PROC_BIND: close
@@ -68,6 +69,7 @@ jobs:
             cat sevenb-throughput-profile/model.sha256
             cat sevenb-throughput-profile/model-size.txt
             echo "memvanta_commit=$GITHUB_SHA"
+            echo "profile_schema=$PROFILE_SCHEMA"
             echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=f16"
             uname -a
             lscpu
