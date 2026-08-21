@@ -49,18 +49,11 @@ int main(int argc,char**argv){
     run("q4_0_fp32_batched_gemm", q4.size()*sizeof(memvanta::BlockQ4_0), batch_threads, batch, [&]{memvanta::matmul_q4_0_batch(q4.data(),xb.data(),y.data(),rows,cols,batch,threads);});
 
     // TinyStories output.weight is Q8_0 with cols=288 and rows=32000.
-    // Exact-shape candidates must beat this baseline and match numerically
-    // before any production dispatch change is considered.
+    // Keep this exact-shape baseline to validate future output-head candidates.
     constexpr std::size_t out_rows=32000, out_cols=288;
-    std::vector<float> OA(out_rows*out_cols), ox(out_cols), oy(out_rows), oy_pair(out_rows);
+    std::vector<float> OA(out_rows*out_cols), ox(out_cols), oy(out_rows);
     for(auto&v:OA)v=dist(rng); for(auto&v:ox)v=dist(rng);
     auto oq8=memvanta::quantize_q8_0(OA.data(),OA.size());
-    memvanta::matvec_q8_0(oq8.data(),ox.data(),oy.data(),out_rows,out_cols,threads);
-    memvanta::matvec_q8_0_rowpair(oq8.data(),ox.data(),oy_pair.data(),out_rows,out_cols,threads);
-    float pair_max_abs=0.0f;
-    for(std::size_t i=0;i<out_rows;++i) pair_max_abs=std::max(pair_max_abs,std::abs(oy[i]-oy_pair[i]));
-    std::cerr<<"q8_output_head_rowpair_max_abs_diff="<<std::setprecision(9)<<pair_max_abs<<"\n";
-    if(pair_max_abs>1e-4f){std::cerr<<"q8 output-head rowpair correctness failure\n";return 3;}
     auto run_output=[&](const char*name,unsigned used_threads,auto fn){
       fn(); std::vector<double> ts; ts.reserve(reps);
       for(unsigned r=0;r<reps;++r){auto t0=Clock::now();fn();auto t1=Clock::now();sink+=oy[r%out_rows];ts.push_back(std::chrono::duration<double>(t1-t0).count());}
@@ -69,6 +62,5 @@ int main(int argc,char**argv){
     };
     run_output("q8_0_output_head_t1",1,[&]{memvanta::matvec_q8_0(oq8.data(),ox.data(),oy.data(),out_rows,out_cols,1);});
     run_output("q8_0_output_head_tN",threads,[&]{memvanta::matvec_q8_0(oq8.data(),ox.data(),oy.data(),out_rows,out_cols,threads);});
-    run_output("q8_0_output_head_rowpair",threads,[&]{memvanta::matvec_q8_0_rowpair(oq8.data(),ox.data(),oy_pair.data(),out_rows,out_cols,threads);});
     if(sink==1234567.0f) std::cerr<<sink;
 }
