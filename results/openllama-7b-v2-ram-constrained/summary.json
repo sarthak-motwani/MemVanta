@@ -1,0 +1,230 @@
+{
+  "memvanta": {
+    "lowest_success_mib": 3584,
+    "runs": [
+      {
+        "runtime": "memvanta",
+        "limit_mib": "8192",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "7680",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "7168",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "6656",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "6144",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "5632",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "5120",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "4608",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "4352",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "4096",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "3840",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "memvanta",
+        "limit_mib": "3584",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      }
+    ]
+  },
+  "llama": {
+    "lowest_success_mib": 3840,
+    "runs": [
+      {
+        "runtime": "llama",
+        "limit_mib": "8192",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "7680",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "7168",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "6656",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "6144",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "5632",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "5120",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "4608",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "4352",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "4096",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "3840",
+        "launcher_exit": "0",
+        "exec_exit": "0",
+        "result": "success",
+        "memory_peak_bytes": "[not set]",
+        "service_result": "success"
+      },
+      {
+        "runtime": "llama",
+        "limit_mib": "3584",
+        "launcher_exit": "1",
+        "exec_exit": "9",
+        "result": "oom",
+        "memory_peak_bytes": "3758096384",
+        "service_result": "oom-kill"
+      }
+    ]
+  },
+  "lowest_success_difference_mib": 256,
+  "memvanta_boundary_reduction_pct": 6.666666666666665
+}

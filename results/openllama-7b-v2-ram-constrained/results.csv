@@ -1,0 +1,25 @@
+runtime,limit_mib,launcher_exit,exec_exit,result,memory_peak_bytes,service_result
+memvanta,8192,0,0,success,[not set],success
+llama,8192,0,0,success,[not set],success
+memvanta,7680,0,0,success,[not set],success
+llama,7680,0,0,success,[not set],success
+memvanta,7168,0,0,success,[not set],success
+llama,7168,0,0,success,[not set],success
+memvanta,6656,0,0,success,[not set],success
+llama,6656,0,0,success,[not set],success
+memvanta,6144,0,0,success,[not set],success
+llama,6144,0,0,success,[not set],success
+memvanta,5632,0,0,success,[not set],success
+llama,5632,0,0,success,[not set],success
+memvanta,5120,0,0,success,[not set],success
+llama,5120,0,0,success,[not set],success
+memvanta,4608,0,0,success,[not set],success
+llama,4608,0,0,success,[not set],success
+memvanta,4352,0,0,success,[not set],success
+llama,4352,0,0,success,[not set],success
+memvanta,4096,0,0,success,[not set],success
+llama,4096,0,0,success,[not set],success
+memvanta,3840,0,0,success,[not set],success
+llama,3840,0,0,success,[not set],success
+memvanta,3584,0,0,success,[not set],success
+llama,3584,1,9,oom,3758096384,oom-kill
