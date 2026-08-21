@@ -10,9 +10,11 @@ A CPU-first C++20 inference runtime for GGUF models, quantized execution, hierar
 
 ## Project status
 
-MemVanta is an engineering prototype under active development. The native inference stack, quantized kernels, tokenizer tests, benchmark harnesses, and CI are implemented. A trained-model A/B workflow is included to validate MemVanta and current llama.cpp on the same GGUF and hardware.
+MemVanta is an engineering prototype under active development. The native inference stack, quantized kernels, tokenizer tests, benchmark harnesses, and CI are implemented.
 
-Until that trained-model workflow completes successfully, the project does **not** claim trained-model parity with llama.cpp or that MemVanta is faster than llama.cpp.
+The trained-model validation gates are now green on `main`: the repeated TinyStories 15M Q4_0 same-model A/B workflow completes under the declared pp64/tg64 protocol, and the SmolLM2-360M Q4_0 validation gate completes tokenizer, greedy-generation, and real-model benchmark execution. This establishes successful native trained-model execution across both checkpoints.
+
+MemVanta does **not** claim to be faster than llama.cpp based on green status alone. Comparative throughput and memory claims must come from preserved repeated A/B numerical artifacts. See `results/VALIDATION_GATES_2026-08-21.md` and `V072_REAL_MODEL_AB.md`.
 
 ## Headline systems benchmark
 
@@ -73,13 +75,16 @@ The default register-blocked activation path was faster on the original benchmar
 The `Real Model A/B` GitHub Actions workflow:
 
 1. builds MemVanta and runs CTest,
-2. downloads a trained TinyStories 15M Q4_0 GGUF,
-3. verifies the exact SHA-256,
-4. builds current llama.cpp CPU tools,
-5. runs the same model through both runtimes under the same CPU settings, and
-6. uploads raw benchmark evidence.
+2. downloads and verifies a trained TinyStories 15M Q4_0 GGUF,
+3. builds a pinned llama.cpp CPU reference,
+4. runs both runtimes on the same GGUF and CPU allocation,
+5. executes the repeated pp64/tg64 benchmark gate with one warm-up and five measured repetitions,
+6. performs deterministic greedy-generation and profiling checks, and
+7. uploads raw benchmark evidence.
 
-See `V072_REAL_MODEL_AB.md` for the validation protocol.
+The `Medium Model Validation` workflow separately validates SmolLM2-360M Q4_0 with tokenizer, deterministic greedy generation, and a short real-model benchmark.
+
+Both validation gates are green on `main` as of 2026-08-21. See `results/VALIDATION_GATES_2026-08-21.md` for the execution-status record and `V072_REAL_MODEL_AB.md` for the repeated A/B protocol.
 
 ## Tokenizer hardening
 
