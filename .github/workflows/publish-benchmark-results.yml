@@ -6,6 +6,8 @@ on:
       - Real Model Validation
       - Medium Model Validation
       - Medium Model A/B
+      - One Billion Model A/B
+      - RAM Constrained 1B
     types: [completed]
 
 permissions:
@@ -54,6 +56,12 @@ jobs:
           elif [ "$WORKFLOW_NAME" = "Medium Model A/B" ]; then
             SRC="downloaded-evidence/memvanta-smollm2-360m-ab"
             DEST="results/smollm2-360m-ab"
+          elif [ "$WORKFLOW_NAME" = "One Billion Model A/B" ]; then
+            SRC="downloaded-evidence/memvanta-oneb-model-ab"
+            DEST="results/tinyllama-1.1b-ab"
+          elif [ "$WORKFLOW_NAME" = "RAM Constrained 1B" ]; then
+            SRC="downloaded-evidence/memvanta-ram-constrained-1b"
+            DEST="results/tinyllama-1.1b-ram-constrained"
           else
             echo "Unsupported workflow: $WORKFLOW_NAME" >&2
             exit 1
