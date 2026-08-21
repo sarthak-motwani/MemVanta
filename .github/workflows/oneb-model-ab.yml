@@ -15,7 +15,9 @@ permissions:
   contents: read
 
 env:
-  HF_REPO: QuantFactory/TinyLlama-1.1B-Chat-v1.0-GGUF
+  MODEL: TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf
+  MODEL_URL: https://huggingface.co/QuantFactory/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/TinyLlama-1.1B-Chat-v1.0.Q4_0.gguf?download=true
+  MODEL_SHA256: 58d7f78ad80e6745d2148dc7391740c2de761da5791c853dec9a09b1f43a1ea9
   THREADS: 4
   CTX: 768
   PROMPT: 512
@@ -52,29 +54,38 @@ jobs:
           cmake --build build-oneb -j "$(nproc)"
           ctest --test-dir build-oneb --output-on-failure
 
-      - name: Resolve, download, and hash Q4_0 GGUF
-        run: |
-          python3 - <<'PY' > model-name.txt
-          import json, urllib.request
-          repo='QuantFactory/TinyLlama-1.1B-Chat-v1.0-GGUF'
-          d=json.load(urllib.request.urlopen('https://huggingface.co/api/models/'+repo))
-          xs=[x['rfilename'] for x in d.get('siblings',[]) if x['rfilename'].lower().endswith('q4_0.gguf')]
-          if len(xs)!=1: raise SystemExit(f'expected one Q4_0 GGUF, found {xs}')
-          print(xs[0])
-          PY
-          MODEL="$(cat model-name.txt)"
-          echo "MODEL=$MODEL" >> "$GITHUB_ENV"
-          curl -L --fail --retry 3 --retry-delay 3 "https://huggingface.co/$HF_REPO/resolve/main/$MODEL?download=true" -o "$MODEL"
-          sha256sum "$MODEL" | tee model.sha256
-          stat -c 'model_bytes=%s' "$MODEL" | tee model-size.txt
+      - name: Prepare evidence directory
+        run: mkdir -p oneb-model-ab
 
-      - name: Native tokenizer and generation smoke
+      - name: Download and verify TinyLlama 1.1B Q4_0
         run: |
-          ./build-oneb/memvanta_tokenize "$MODEL" 'The capital of France is' --bos | tee tokenizer-smoke.txt
+          curl -L --fail --retry 3 --retry-delay 3 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c - | tee oneb-model-ab/model-sha-check.txt
+          sha256sum "$MODEL" | tee oneb-model-ab/model.sha256
+          stat -c 'model_bytes=%s' "$MODEL" | tee oneb-model-ab/model-size.txt
+
+      - name: Native compatibility diagnostics
+        id: native_smoke
+        continue-on-error: true
+        run: |
+          set +e
+          ./build-oneb/memvanta_tokenize "$MODEL" 'The capital of France is' --bos \
+            > oneb-model-ab/tokenizer-smoke.txt \
+            2> oneb-model-ab/tokenizer-smoke.stderr.txt
+          tok_rc=$?
+          echo "$tok_rc" > oneb-model-ab/tokenizer-smoke.exitcode.txt
+
           timeout --signal=TERM --kill-after=20s 900 \
             ./build-oneb/memvanta_real --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
             --temperature 0 --n 8 --prompt 'The capital of France is' \
-            > generation-smoke.txt 2> generation-smoke.stderr.txt
+            > oneb-model-ab/generation-smoke.txt \
+            2> oneb-model-ab/generation-smoke.stderr.txt
+          gen_rc=$?
+          echo "$gen_rc" > oneb-model-ab/generation-smoke.exitcode.txt
+
+          echo "tokenizer_rc=$tok_rc" | tee oneb-model-ab/native-smoke-status.txt
+          echo "generation_rc=$gen_rc" | tee -a oneb-model-ab/native-smoke-status.txt
+          exit 0
 
       - name: Build pinned llama.cpp CPU tools
         run: |
@@ -89,12 +100,9 @@ jobs:
 
       - name: Record provenance
         run: |
-          mkdir -p oneb-model-ab
           {
             echo "model=$MODEL"
-            cat model.sha256
-            cat model-size.txt
-            echo "hf_repo=$HF_REPO"
+            echo "model_sha256=$MODEL_SHA256"
             echo "memvanta_commit=$GITHUB_SHA"
             echo "llama_cpp_ref=$LLAMA_CPP_REF"
             echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=$KV reps=$REPS warmup=$WARMUP"
@@ -104,36 +112,55 @@ jobs:
           } > oneb-model-ab/environment.txt
 
       - name: Run MemVanta repeated benchmark
+        id: mem_bench
+        continue-on-error: true
         run: |
+          set +e
           /usr/bin/time -v ./build-oneb/memvanta_real_bench \
             --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
             --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" --kv "$KV" \
             --warmup "$WARMUP" --reps "$REPS" --no-client \
             --csv oneb-model-ab/memvanta.csv \
             > oneb-model-ab/memvanta.stdout.txt 2> oneb-model-ab/memvanta.time.txt
+          rc=$?
+          echo "$rc" > oneb-model-ab/memvanta.exitcode.txt
+          exit 0
 
       - name: Run llama.cpp repeated benchmark
+        id: llama_bench
+        continue-on-error: true
         run: |
+          set +e
           /usr/bin/time -v ./llama.cpp/build/bin/llama-bench \
             -m "$MODEL" -p "$PROMPT" -n "$GEN" -t "$THREADS" -r "$REPS" \
             -b "$BATCH" -ub "$BATCH" -ctk "$KV" -ctv "$KV" -ngl 0 -o json \
             > oneb-model-ab/llama-bench.json 2> oneb-model-ab/llama-bench.time.txt
+          rc=$?
+          echo "$rc" > oneb-model-ab/llama-bench.exitcode.txt
+          exit 0
 
-      - name: Summarize A/B
+      - name: Summarize A/B when both benchmarks succeeded
+        continue-on-error: true
         run: |
           python3 - <<'PY'
           import csv,json,pathlib,re,statistics
           o=pathlib.Path('oneb-model-ab')
+          mrc=int((o/'memvanta.exitcode.txt').read_text().strip())
+          lrc=int((o/'llama-bench.exitcode.txt').read_text().strip())
+          status={'memvanta_exit':mrc,'llama_exit':lrc}
+          if mrc or lrc or not (o/'memvanta.csv').exists() or not (o/'llama-bench.json').exists():
+              (o/'diagnostic-summary.json').write_text(json.dumps(status,indent=2)+'\n')
+              raise SystemExit(0)
           rows=list(csv.DictReader((o/'memvanta.csv').open()))
           mpp=[float(r['pp_tps']) for r in rows]; mtg=[float(r['tg_tps']) for r in rows]
           lj=json.loads((o/'llama-bench.json').read_text()); lj=[lj] if isinstance(lj,dict) else lj
           lpp=[];ltg=[]
           for r in lj:
-            vals=[float(x) for x in (r.get('samples_ts') or [r.get('avg_ts')]) if x is not None]
-            if int(r.get('n_prompt',0) or 0) and not int(r.get('n_gen',0) or 0): lpp+=vals
-            if int(r.get('n_gen',0) or 0) and not int(r.get('n_prompt',0) or 0): ltg+=vals
+              vals=[float(x) for x in (r.get('samples_ts') or [r.get('avg_ts')]) if x is not None]
+              if int(r.get('n_prompt',0) or 0) and not int(r.get('n_gen',0) or 0): lpp+=vals
+              if int(r.get('n_gen',0) or 0) and not int(r.get('n_prompt',0) or 0): ltg+=vals
           def rss(p):
-            m=re.search(r'Maximum resident set size \(kbytes\):\s*(\d+)',p.read_text(errors='replace')); return int(m.group(1)) if m else None
+              m=re.search(r'Maximum resident set size \(kbytes\):\s*(\d+)',p.read_text(errors='replace')); return int(m.group(1)) if m else None
           def d(x): return {'mean':statistics.mean(x),'sd':statistics.stdev(x),'min':min(x),'max':max(x),'cv_pct':statistics.stdev(x)/statistics.mean(x)*100}
           s={'benchmark':'TinyLlama 1.1B Q4_0 same-model CPU A/B','memvanta_pp':d(mpp),'memvanta_tg':d(mtg),'llama_pp':d(lpp),'llama_tg':d(ltg),'memvanta_peak_rss_kib':rss(o/'memvanta.time.txt'),'llama_peak_rss_kib':rss(o/'llama-bench.time.txt')}
           s['llama_vs_memvanta_pp_speedup']=s['llama_pp']['mean']/s['memvanta_pp']['mean']
@@ -144,11 +171,7 @@ jobs:
           print((o/'SUMMARY.md').read_text())
           PY
 
-      - name: Preserve supporting evidence
-        run: |
-          cp model.sha256 model-size.txt tokenizer-smoke.txt generation-smoke.txt generation-smoke.stderr.txt oneb-model-ab/
-
-      - name: Upload benchmark evidence
+      - name: Upload benchmark and diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -156,3 +179,14 @@ jobs:
           path: oneb-model-ab/**
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Enforce benchmark success after evidence upload
+        if: always()
+        run: |
+          tok_rc="$(cat oneb-model-ab/tokenizer-smoke.exitcode.txt 2>/dev/null || echo 127)"
+          gen_rc="$(cat oneb-model-ab/generation-smoke.exitcode.txt 2>/dev/null || echo 127)"
+          mem_rc="$(cat oneb-model-ab/memvanta.exitcode.txt 2>/dev/null || echo 127)"
+          llama_rc="$(cat oneb-model-ab/llama-bench.exitcode.txt 2>/dev/null || echo 127)"
+          echo "tokenizer=$tok_rc generation=$gen_rc memvanta_bench=$mem_rc llama_bench=$llama_rc"
+          test "$mem_rc" -eq 0
+          test "$llama_rc" -eq 0
