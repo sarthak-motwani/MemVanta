@@ -1,3 +1,4 @@
+# Explicit retrigger after tested kernel commits created by GitHub Actions.
 name: Seven Billion Throughput Profile
 
 on:
