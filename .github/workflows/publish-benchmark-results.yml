@@ -1,0 +1,91 @@
+name: Publish Benchmark Results
+
+on:
+  workflow_run:
+    workflows:
+      - Real Model Validation
+      - Medium Model Validation
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download benchmark artifact
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+          path: downloaded-evidence
+
+      - name: Preserve evidence under results
+        env:
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p results
+
+          if [ "$WORKFLOW_NAME" = "Real Model Validation" ]; then
+            SRC="downloaded-evidence/memvanta-stories15m-repeated-ab"
+            DEST="results/stories15m-repeated-ab"
+          elif [ "$WORKFLOW_NAME" = "Medium Model Validation" ]; then
+            SRC="downloaded-evidence/memvanta-smollm2-360m-evidence"
+            DEST="results/smollm2-360m"
+          else
+            echo "Unsupported workflow: $WORKFLOW_NAME" >&2
+            exit 1
+          fi
+
+          test -d "$SRC"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          cp -a "$SRC"/. "$DEST"/
+
+          cat > "$DEST/WORKFLOW_RUN.md" <<EOF
+          # Workflow run provenance
+
+          - Workflow: $WORKFLOW_NAME
+          - Run ID: $RUN_ID
+          - Run number: $RUN_NUMBER
+          - MemVanta commit: $HEAD_SHA
+          - Run URL: $RUN_URL
+          - Conclusion: success
+          EOF
+
+          find "$DEST" -maxdepth 2 -type f -print | sort
+
+      - name: Commit published evidence
+        env:
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/
+          if git diff --cached --quiet; then
+            echo "No evidence changes to commit"
+            exit 0
+          fi
+          git commit -m "Publish benchmark evidence from ${WORKFLOW_NAME} run ${RUN_ID}"
+          git pull --rebase origin main
+          git push origin HEAD:main
