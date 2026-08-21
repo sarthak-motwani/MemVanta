@@ -64,29 +64,6 @@ jobs:
           sha256sum "$MODEL" | tee oneb-model-ab/model.sha256
           stat -c 'model_bytes=%s' "$MODEL" | tee oneb-model-ab/model-size.txt
 
-      - name: Native compatibility diagnostics
-        id: native_smoke
-        continue-on-error: true
-        run: |
-          set +e
-          ./build-oneb/memvanta_tokenize "$MODEL" 'The capital of France is' --bos \
-            > oneb-model-ab/tokenizer-smoke.txt \
-            2> oneb-model-ab/tokenizer-smoke.stderr.txt
-          tok_rc=$?
-          echo "$tok_rc" > oneb-model-ab/tokenizer-smoke.exitcode.txt
-
-          timeout --signal=TERM --kill-after=20s 900 \
-            ./build-oneb/memvanta_real --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
-            --temperature 0 --n 8 --prompt 'The capital of France is' \
-            > oneb-model-ab/generation-smoke.txt \
-            2> oneb-model-ab/generation-smoke.stderr.txt
-          gen_rc=$?
-          echo "$gen_rc" > oneb-model-ab/generation-smoke.exitcode.txt
-
-          echo "tokenizer_rc=$tok_rc" | tee oneb-model-ab/native-smoke-status.txt
-          echo "generation_rc=$gen_rc" | tee -a oneb-model-ab/native-smoke-status.txt
-          exit 0
-
       - name: Build pinned llama.cpp CPU tools
         run: |
           git init llama.cpp
@@ -111,45 +88,91 @@ jobs:
             free -h
           } > oneb-model-ab/environment.txt
 
-      - name: Run MemVanta repeated benchmark
-        id: mem_bench
+      - name: Run staged 1B diagnostics and A/B
+        id: staged_ab
         continue-on-error: true
         run: |
           set +e
+
+          ./build-oneb/memvanta_tokenize "$MODEL" 'The capital of France is' --bos \
+            > oneb-model-ab/tokenizer-smoke.txt \
+            2> oneb-model-ab/tokenizer-smoke.stderr.txt
+          tok_rc=$?
+          echo "$tok_rc" > oneb-model-ab/tokenizer-smoke.exitcode.txt
+
+          timeout --signal=TERM --kill-after=15s 180 \
+            ./build-oneb/memvanta_real --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
+            --temperature 0 --n 2 --prompt 'The capital of France is' \
+            > oneb-model-ab/generation-smoke.txt \
+            2> oneb-model-ab/generation-smoke.stderr.txt
+          gen_rc=$?
+          echo "$gen_rc" > oneb-model-ab/generation-smoke.exitcode.txt
+
+          /usr/bin/time -v ./build-oneb/memvanta_real_bench \
+            --model "$MODEL" --threads "$THREADS" --ctx 128 \
+            --prompt 32 --gen 16 --batch 16 --kv "$KV" \
+            --warmup 0 --reps 1 --no-client \
+            --csv oneb-model-ab/memvanta-micro.csv \
+            > oneb-model-ab/memvanta-micro.stdout.txt \
+            2> oneb-model-ab/memvanta-micro.time.txt
+          mem_micro_rc=$?
+          echo "$mem_micro_rc" > oneb-model-ab/memvanta-micro.exitcode.txt
+
+          /usr/bin/time -v ./llama.cpp/build/bin/llama-bench \
+            -m "$MODEL" -p 32 -n 16 -t "$THREADS" -r 1 \
+            -b 16 -ub 16 -ctk "$KV" -ctv "$KV" -ngl 0 -o json \
+            > oneb-model-ab/llama-micro.json \
+            2> oneb-model-ab/llama-micro.time.txt
+          llama_micro_rc=$?
+          echo "$llama_micro_rc" > oneb-model-ab/llama-micro.exitcode.txt
+
+          {
+            echo "tokenizer_rc=$tok_rc"
+            echo "generation_rc=$gen_rc"
+            echo "memvanta_micro_rc=$mem_micro_rc"
+            echo "llama_micro_rc=$llama_micro_rc"
+          } | tee oneb-model-ab/compatibility-status.txt
+
+          if [ "$mem_micro_rc" -ne 0 ] || [ "$llama_micro_rc" -ne 0 ]; then
+            echo "full_benchmark=skipped_after_micro_failure" | tee oneb-model-ab/full-benchmark-status.txt
+            exit 0
+          fi
+
           /usr/bin/time -v ./build-oneb/memvanta_real_bench \
             --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
             --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" --kv "$KV" \
             --warmup "$WARMUP" --reps "$REPS" --no-client \
             --csv oneb-model-ab/memvanta.csv \
-            > oneb-model-ab/memvanta.stdout.txt 2> oneb-model-ab/memvanta.time.txt
-          rc=$?
-          echo "$rc" > oneb-model-ab/memvanta.exitcode.txt
-          exit 0
+            > oneb-model-ab/memvanta.stdout.txt \
+            2> oneb-model-ab/memvanta.time.txt
+          mem_rc=$?
+          echo "$mem_rc" > oneb-model-ab/memvanta.exitcode.txt
 
-      - name: Run llama.cpp repeated benchmark
-        id: llama_bench
-        continue-on-error: true
-        run: |
-          set +e
           /usr/bin/time -v ./llama.cpp/build/bin/llama-bench \
             -m "$MODEL" -p "$PROMPT" -n "$GEN" -t "$THREADS" -r "$REPS" \
             -b "$BATCH" -ub "$BATCH" -ctk "$KV" -ctv "$KV" -ngl 0 -o json \
-            > oneb-model-ab/llama-bench.json 2> oneb-model-ab/llama-bench.time.txt
-          rc=$?
-          echo "$rc" > oneb-model-ab/llama-bench.exitcode.txt
+            > oneb-model-ab/llama-bench.json \
+            2> oneb-model-ab/llama-bench.time.txt
+          llama_rc=$?
+          echo "$llama_rc" > oneb-model-ab/llama-bench.exitcode.txt
+
+          echo "memvanta_full_rc=$mem_rc" | tee oneb-model-ab/full-benchmark-status.txt
+          echo "llama_full_rc=$llama_rc" | tee -a oneb-model-ab/full-benchmark-status.txt
           exit 0
 
-      - name: Summarize A/B when both benchmarks succeeded
+      - name: Summarize successful full A/B
         continue-on-error: true
         run: |
           python3 - <<'PY'
           import csv,json,pathlib,re,statistics
           o=pathlib.Path('oneb-model-ab')
-          mrc=int((o/'memvanta.exitcode.txt').read_text().strip())
-          lrc=int((o/'llama-bench.exitcode.txt').read_text().strip())
-          status={'memvanta_exit':mrc,'llama_exit':lrc}
+          mf=o/'memvanta.exitcode.txt'; lf=o/'llama-bench.exitcode.txt'
+          if not mf.exists() or not lf.exists():
+              (o/'diagnostic-summary.json').write_text(json.dumps({'full_benchmark':'not_completed'},indent=2)+'\n')
+              raise SystemExit(0)
+          mrc=int(mf.read_text().strip()); lrc=int(lf.read_text().strip())
           if mrc or lrc or not (o/'memvanta.csv').exists() or not (o/'llama-bench.json').exists():
-              (o/'diagnostic-summary.json').write_text(json.dumps(status,indent=2)+'\n')
+              (o/'diagnostic-summary.json').write_text(json.dumps({'memvanta_exit':mrc,'llama_exit':lrc},indent=2)+'\n')
               raise SystemExit(0)
           rows=list(csv.DictReader((o/'memvanta.csv').open()))
           mpp=[float(r['pp_tps']) for r in rows]; mtg=[float(r['tg_tps']) for r in rows]
@@ -183,10 +206,13 @@ jobs:
       - name: Enforce benchmark success after evidence upload
         if: always()
         run: |
-          tok_rc="$(cat oneb-model-ab/tokenizer-smoke.exitcode.txt 2>/dev/null || echo 127)"
-          gen_rc="$(cat oneb-model-ab/generation-smoke.exitcode.txt 2>/dev/null || echo 127)"
+          mem_micro_rc="$(cat oneb-model-ab/memvanta-micro.exitcode.txt 2>/dev/null || echo 127)"
+          llama_micro_rc="$(cat oneb-model-ab/llama-micro.exitcode.txt 2>/dev/null || echo 127)"
           mem_rc="$(cat oneb-model-ab/memvanta.exitcode.txt 2>/dev/null || echo 127)"
           llama_rc="$(cat oneb-model-ab/llama-bench.exitcode.txt 2>/dev/null || echo 127)"
-          echo "tokenizer=$tok_rc generation=$gen_rc memvanta_bench=$mem_rc llama_bench=$llama_rc"
+          echo "micro: memvanta=$mem_micro_rc llama=$llama_micro_rc"
+          echo "full: memvanta=$mem_rc llama=$llama_rc"
+          test "$mem_micro_rc" -eq 0
+          test "$llama_micro_rc" -eq 0
           test "$mem_rc" -eq 0
           test "$llama_rc" -eq 0
