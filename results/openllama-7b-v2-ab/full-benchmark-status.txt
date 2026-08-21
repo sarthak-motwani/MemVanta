@@ -1,0 +1,2 @@
+memvanta_full_rc=0
+llama_full_rc=0

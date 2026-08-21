@@ -1,0 +1,28 @@
+{
+  "benchmark": "OpenLLaMA 7B v2 Q4_0 same-model CPU A/B",
+  "memvanta_pp": {
+    "mean": 3.149208,
+    "sd": 0.0367745247420004,
+    "cv_pct": 1.16773883281131
+  },
+  "memvanta_tg": {
+    "mean": 1.524044,
+    "sd": 0.023454190030781332,
+    "cv_pct": 1.5389444156980594
+  },
+  "llama_pp": {
+    "mean": 45.81826,
+    "sd": 0.960408776511334,
+    "cv_pct": 2.0961266894712587
+  },
+  "llama_tg": {
+    "mean": 7.764734,
+    "sd": 0.08836507613305132,
+    "cv_pct": 1.1380309503590378
+  },
+  "memvanta_peak_rss_kib": 3983412,
+  "llama_peak_rss_kib": 7586960,
+  "llama_vs_memvanta_pp_speedup": 14.549137433919896,
+  "llama_vs_memvanta_tg_speedup": 5.094822721653705,
+  "memvanta_rss_reduction_pct": 47.496599428493106
+}
