@@ -9,6 +9,7 @@ on:
       - One Billion Model A/B
       - RAM Constrained 1B
       - Three Billion Model A/B
+      - Seven Billion Feasibility
     types: [completed]
 
 permissions:
@@ -21,7 +22,8 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       (github.event.workflow_run.conclusion == 'success' ||
        github.event.workflow_run.name == 'One Billion Model A/B' ||
-       github.event.workflow_run.name == 'Three Billion Model A/B')
+       github.event.workflow_run.name == 'Three Billion Model A/B' ||
+       github.event.workflow_run.name == 'Seven Billion Feasibility')
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -76,6 +78,13 @@ jobs:
               DEST="results/openllama-3b-v2-ab"
             else
               DEST="results/diagnostics/openllama-3b-v2-ab-run-${RUN_ID}"
+            fi
+          elif [ "$WORKFLOW_NAME" = "Seven Billion Feasibility" ]; then
+            SRC="downloaded-evidence/memvanta-sevenb-feasibility"
+            if [ "$CONCLUSION" = "success" ]; then
+              DEST="results/openllama-7b-v2-feasibility"
+            else
+              DEST="results/diagnostics/openllama-7b-v2-feasibility-run-${RUN_ID}"
             fi
           else
             echo "Unsupported workflow: $WORKFLOW_NAME" >&2
