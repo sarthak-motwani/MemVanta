@@ -1,0 +1,50 @@
+# MemVanta vs llama.cpp — real TinyStories Q4_0 A/B
+
+same GGUF, CPU-only, same threads; pp64/tg64, context 128, batch 32, KV=f16; llama.cpp JSON samples_ts used for repetition statistics
+
+- **model**: stories15M-q4_0.gguf
+- **prompt_tokens**: 64
+- **generation_tokens**: 64
+- **context**: 128
+- **threads**: 4
+- **repetitions**: 5
+- **warmup**: 1
+- **batch**: 32
+- **memvanta_kv**: f16
+- **memvanta_pp_tps_samples**: 5
+- **memvanta_pp_tps_mean**: 2107.444
+- **memvanta_pp_tps_sd**: 43.808515496419126
+- **memvanta_pp_tps_median**: 2098.37
+- **memvanta_pp_tps_min**: 2070.56
+- **memvanta_pp_tps_max**: 2176.22
+- **memvanta_tg_tps_samples**: 5
+- **memvanta_tg_tps_mean**: 730.6522
+- **memvanta_tg_tps_sd**: 76.04300394316363
+- **memvanta_tg_tps_median**: 781.575
+- **memvanta_tg_tps_min**: 616.595
+- **memvanta_tg_tps_max**: 784.222
+- **memvanta_peak_rss_kib**: 30676
+- **llama_peak_rss_kib**: 43204
+- **llama_pp_tps_samples**: 5
+- **llama_pp_tps_mean**: 8211.266
+- **llama_pp_tps_sd**: 428.90454378567756
+- **llama_pp_tps_median**: 8400.26
+- **llama_pp_tps_min**: 7455.36
+- **llama_pp_tps_max**: 8464.56
+- **llama_tg_tps_samples**: 5
+- **llama_tg_tps_mean**: 2007.99
+- **llama_tg_tps_sd**: 115.3091657241523
+- **llama_tg_tps_median**: 2007.62
+- **llama_tg_tps_min**: 1830.32
+- **llama_tg_tps_max**: 2110.44
+- **memvanta_pp_cv_pct**: 2.078751107807331
+- **memvanta_tg_cv_pct**: 10.407551492100295
+- **llama_pp_cv_pct**: 5.223366820483926
+- **llama_tg_cv_pct**: 5.742516931067998
+- **memvanta_vs_llama_pp_ratio**: 0.2566527500144314
+- **llama_vs_memvanta_pp_speedup**: 3.8963151571287304
+- **memvanta_vs_llama_tg_ratio**: 0.3638724296435739
+- **llama_vs_memvanta_tg_speedup**: 2.7482159090193665
+- **memvanta_vs_llama_rss_ratio**: 0.7100268493657995
+- **memvanta_rss_reduction_pct**: 28.997315063420046
+- **high_variance_warning**: True
