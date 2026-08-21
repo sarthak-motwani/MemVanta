@@ -1,0 +1,200 @@
+name: Seven Billion Model A/B
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sevenb-model-ab.yml'
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+
+permissions:
+  contents: read
+
+env:
+  HF_REPO: maddes8cht/openlm-research-open_llama_7b_v2-gguf
+  MODEL: openlm-research-open_llama_7b_v2-Q4_0.gguf
+  MODEL_SHA256: 892f6e2e840ed98bb7bc1d74da67ae0cca52b2d90b0316d0a7e66a37a5a60760
+  THREADS: 4
+  CTX: 768
+  PROMPT: 512
+  GEN: 128
+  BATCH: 32
+  KV: f16
+  REPS: 5
+  WARMUP: 1
+  LLAMA_CPP_REF: 6503355df0eb4f65875012523263c302fe0088c1
+  OMP_NUM_THREADS: 4
+  OMP_DYNAMIC: 'FALSE'
+  OMP_PROC_BIND: close
+  OMP_PLACES: cores
+  MALLOC_ARENA_MAX: 2
+
+jobs:
+  openllama-7b-ab:
+    name: OpenLLaMA 7B v2 Q4_0 repeated A/B
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout MemVanta
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl git time ccache python3
+
+      - name: Build MemVanta
+        run: |
+          cmake -S . -B build-sevenb-ab -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-sevenb-ab -j "$(nproc)"
+          ctest --test-dir build-sevenb-ab --output-on-failure
+
+      - name: Prepare evidence directory
+        run: mkdir -p sevenb-model-ab
+
+      - name: Download and verify OpenLLaMA 7B Q4_0
+        run: |
+          set -euo pipefail
+          MODEL_URL="https://huggingface.co/$HF_REPO/resolve/main/$MODEL?download=true"
+          echo "$MODEL_URL" > sevenb-model-ab/model-url.txt
+          curl -L --fail --retry 3 --retry-delay 5 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+          sha256sum "$MODEL" | tee sevenb-model-ab/model.sha256
+          actual_bytes="$(stat -c %s "$MODEL")"
+          echo "model_bytes=$actual_bytes" | tee sevenb-model-ab/model-size.txt
+          test "$actual_bytes" -gt 3500000000
+          python3 - <<'PY'
+          import pathlib,struct,json
+          p=pathlib.Path('openlm-research-open_llama_7b_v2-Q4_0.gguf')
+          with p.open('rb') as f:
+              magic=f.read(4); raw=f.read(4)
+          if len(raw) != 4: raise SystemExit('truncated GGUF header')
+          version=struct.unpack('<I', raw)[0]
+          info={'magic':magic.decode('ascii','replace'),'gguf_version':version}
+          pathlib.Path('sevenb-model-ab/gguf-header.json').write_text(json.dumps(info,indent=2)+'\n')
+          if magic != b'GGUF': raise SystemExit('invalid GGUF magic')
+          if version < 2: raise SystemExit(f'obsolete GGUF version {version}; need >= 2')
+          PY
+
+      - name: Build pinned llama.cpp CPU benchmark
+        run: |
+          set -euo pipefail
+          git init llama.cpp
+          git -C llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C llama.cpp fetch --depth 1 origin "$LLAMA_CPP_REF"
+          git -C llama.cpp checkout --detach FETCH_HEAD
+          cmake -S llama.cpp -B llama.cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_CUDA=OFF -DGGML_METAL=OFF -DLLAMA_CURL=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build llama.cpp/build --target llama-bench -j "$(nproc)"
+          git -C llama.cpp rev-parse HEAD | tee sevenb-model-ab/llama_cpp_commit.txt
+
+      - name: Record provenance
+        run: |
+          {
+            echo "model=$MODEL"
+            echo "hf_repo=$HF_REPO"
+            cat sevenb-model-ab/model.sha256
+            cat sevenb-model-ab/model-size.txt
+            cat sevenb-model-ab/gguf-header.json
+            echo "memvanta_commit=$GITHUB_SHA"
+            echo "llama_cpp_ref=$LLAMA_CPP_REF"
+            echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=$KV reps=$REPS warmup=$WARMUP"
+            uname -a
+            lscpu
+            free -h
+          } > sevenb-model-ab/environment.txt
+
+      - name: Run compatibility gate and repeated A/B
+        continue-on-error: true
+        run: |
+          set +e
+          ./build-sevenb-ab/memvanta_tokenize "$MODEL" 'The capital of France is' --bos > sevenb-model-ab/tokenizer-smoke.txt 2> sevenb-model-ab/tokenizer-smoke.stderr.txt
+          tok_rc=$?; echo "$tok_rc" > sevenb-model-ab/tokenizer-smoke.exitcode.txt
+
+          timeout --signal=TERM --kill-after=15s 600 ./build-sevenb-ab/memvanta_real --model "$MODEL" --threads "$THREADS" --ctx 128 --temperature 0 --n 2 --prompt 'The capital of France is' > sevenb-model-ab/generation-smoke.txt 2> sevenb-model-ab/generation-smoke.stderr.txt
+          gen_rc=$?; echo "$gen_rc" > sevenb-model-ab/generation-smoke.exitcode.txt
+
+          /usr/bin/time -v timeout --signal=TERM --kill-after=15s 1200 ./build-sevenb-ab/memvanta_real_bench --model "$MODEL" --threads "$THREADS" --ctx 128 --prompt 32 --gen 16 --batch 16 --kv "$KV" --warmup 0 --reps 1 --no-client --csv sevenb-model-ab/memvanta-micro.csv > sevenb-model-ab/memvanta-micro.stdout.txt 2> sevenb-model-ab/memvanta-micro.time.txt
+          mem_micro_rc=$?; echo "$mem_micro_rc" > sevenb-model-ab/memvanta-micro.exitcode.txt
+
+          /usr/bin/time -v timeout --signal=TERM --kill-after=15s 1200 ./llama.cpp/build/bin/llama-bench -m "$MODEL" -p 32 -n 16 -t "$THREADS" -r 1 -b 16 -ub 16 -ctk "$KV" -ctv "$KV" -ngl 0 -o json > sevenb-model-ab/llama-micro.json 2> sevenb-model-ab/llama-micro.time.txt
+          llama_micro_rc=$?; echo "$llama_micro_rc" > sevenb-model-ab/llama-micro.exitcode.txt
+
+          printf 'tokenizer_rc=%s\ngeneration_rc=%s\nmemvanta_micro_rc=%s\nllama_micro_rc=%s\n' "$tok_rc" "$gen_rc" "$mem_micro_rc" "$llama_micro_rc" | tee sevenb-model-ab/compatibility-status.txt
+          if [ "$tok_rc" -ne 0 ] || [ "$gen_rc" -ne 0 ] || [ "$mem_micro_rc" -ne 0 ] || [ "$llama_micro_rc" -ne 0 ]; then
+            echo "full_benchmark=skipped_after_compatibility_failure" > sevenb-model-ab/full-benchmark-status.txt
+            exit 0
+          fi
+
+          /usr/bin/time -v timeout --signal=TERM --kill-after=30s 7200 ./build-sevenb-ab/memvanta_real_bench --model "$MODEL" --threads "$THREADS" --ctx "$CTX" --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" --kv "$KV" --warmup "$WARMUP" --reps "$REPS" --no-client --csv sevenb-model-ab/memvanta.csv > sevenb-model-ab/memvanta.stdout.txt 2> sevenb-model-ab/memvanta.time.txt
+          mem_rc=$?; echo "$mem_rc" > sevenb-model-ab/memvanta.exitcode.txt
+
+          /usr/bin/time -v timeout --signal=TERM --kill-after=30s 5400 ./llama.cpp/build/bin/llama-bench -m "$MODEL" -p "$PROMPT" -n "$GEN" -t "$THREADS" -r "$REPS" -b "$BATCH" -ub "$BATCH" -ctk "$KV" -ctv "$KV" -ngl 0 -o json > sevenb-model-ab/llama-bench.json 2> sevenb-model-ab/llama-bench.time.txt
+          llama_rc=$?; echo "$llama_rc" > sevenb-model-ab/llama-bench.exitcode.txt
+          printf 'memvanta_full_rc=%s\nllama_full_rc=%s\n' "$mem_rc" "$llama_rc" | tee sevenb-model-ab/full-benchmark-status.txt
+          exit 0
+
+      - name: Summarize repeated A/B
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 - <<'PY'
+          import csv,json,pathlib,re,statistics
+          o=pathlib.Path('sevenb-model-ab')
+          mf=o/'memvanta.exitcode.txt'; lf=o/'llama-bench.exitcode.txt'
+          if not mf.exists() or not lf.exists():
+              (o/'diagnostic-summary.json').write_text(json.dumps({'full_benchmark':'not_completed'},indent=2)+'\n'); raise SystemExit(0)
+          mrc=int(mf.read_text().strip()); lrc=int(lf.read_text().strip())
+          if mrc or lrc or not (o/'memvanta.csv').exists() or not (o/'llama-bench.json').exists():
+              (o/'diagnostic-summary.json').write_text(json.dumps({'memvanta_exit':mrc,'llama_exit':lrc},indent=2)+'\n'); raise SystemExit(0)
+          rows=list(csv.DictReader((o/'memvanta.csv').open()))
+          mpp=[float(r['pp_tps']) for r in rows]; mtg=[float(r['tg_tps']) for r in rows]
+          lj=json.loads((o/'llama-bench.json').read_text()); lj=[lj] if isinstance(lj,dict) else lj
+          lpp=[]; ltg=[]
+          for r in lj:
+              vals=[float(x) for x in (r.get('samples_ts') or [r.get('avg_ts')]) if x is not None]
+              if int(r.get('n_prompt',0) or 0) and not int(r.get('n_gen',0) or 0): lpp += vals
+              if int(r.get('n_gen',0) or 0) and not int(r.get('n_prompt',0) or 0): ltg += vals
+          def rss(p):
+              m=re.search(r'Maximum resident set size \(kbytes\):\s*(\d+)',p.read_text(errors='replace')); return int(m.group(1)) if m else None
+          def d(x):
+              sd=statistics.stdev(x) if len(x)>1 else 0.0
+              return {'mean':statistics.mean(x),'sd':sd,'cv_pct':sd/statistics.mean(x)*100 if statistics.mean(x) else 0.0}
+          s={'benchmark':'OpenLLaMA 7B v2 Q4_0 same-model CPU A/B','memvanta_pp':d(mpp),'memvanta_tg':d(mtg),'llama_pp':d(lpp),'llama_tg':d(ltg),'memvanta_peak_rss_kib':rss(o/'memvanta.time.txt'),'llama_peak_rss_kib':rss(o/'llama-bench.time.txt')}
+          s['llama_vs_memvanta_pp_speedup']=s['llama_pp']['mean']/s['memvanta_pp']['mean']
+          s['llama_vs_memvanta_tg_speedup']=s['llama_tg']['mean']/s['memvanta_tg']['mean']
+          s['memvanta_rss_reduction_pct']=(1-s['memvanta_peak_rss_kib']/s['llama_peak_rss_kib'])*100
+          (o/'summary.json').write_text(json.dumps(s,indent=2)+'\n')
+          (o/'SUMMARY.md').write_text(f"# OpenLLaMA 7B v2 Q4_0 — MemVanta vs llama.cpp\n\nExact same GGUF on both runtimes. CPU-only, 4 threads, pp512/tg128, context 768, batch 32, F16 KV, 1 warm-up + 5 measured repetitions.\n\n- MemVanta pp: {s['memvanta_pp']['mean']:.2f} ± {s['memvanta_pp']['sd']:.2f} tok/s\n- llama.cpp pp: {s['llama_pp']['mean']:.2f} ± {s['llama_pp']['sd']:.2f} tok/s\n- MemVanta tg: {s['memvanta_tg']['mean']:.2f} ± {s['memvanta_tg']['sd']:.2f} tok/s\n- llama.cpp tg: {s['llama_tg']['mean']:.2f} ± {s['llama_tg']['sd']:.2f} tok/s\n- MemVanta peak RSS: {s['memvanta_peak_rss_kib']} KiB\n- llama.cpp peak RSS: {s['llama_peak_rss_kib']} KiB\n- MemVanta RSS reduction: {s['memvanta_rss_reduction_pct']:.2f}%\n")
+          PY
+
+      - name: Upload benchmark and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memvanta-sevenb-model-ab
+          path: sevenb-model-ab/**
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce benchmark success after evidence upload
+        if: always()
+        run: |
+          tok_rc="$(cat sevenb-model-ab/tokenizer-smoke.exitcode.txt 2>/dev/null || echo 127)"
+          gen_rc="$(cat sevenb-model-ab/generation-smoke.exitcode.txt 2>/dev/null || echo 127)"
+          mem_micro_rc="$(cat sevenb-model-ab/memvanta-micro.exitcode.txt 2>/dev/null || echo 127)"
+          llama_micro_rc="$(cat sevenb-model-ab/llama-micro.exitcode.txt 2>/dev/null || echo 127)"
+          mem_rc="$(cat sevenb-model-ab/memvanta.exitcode.txt 2>/dev/null || echo 127)"
+          llama_rc="$(cat sevenb-model-ab/llama-bench.exitcode.txt 2>/dev/null || echo 127)"
+          test "$tok_rc" -eq 0
+          test "$gen_rc" -eq 0
+          test "$mem_micro_rc" -eq 0
+          test "$llama_micro_rc" -eq 0
+          test "$mem_rc" -eq 0
+          test "$llama_rc" -eq 0
