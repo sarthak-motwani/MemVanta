@@ -1,0 +1,49 @@
+{
+  "benchmark": "SmolLM2-360M Q4_0 same-model CPU A/B",
+  "model": "SmolLM2-360M.Q4_0.gguf",
+  "prompt_tokens": 512,
+  "generation_tokens": 128,
+  "context": 768,
+  "threads": 4,
+  "batch": 32,
+  "kv": "f16",
+  "repetitions": 5,
+  "warmup": 1,
+  "memvanta_pp": {
+    "mean": 46.616260000000004,
+    "sd": 0.9187380736640883,
+    "median": 47.0672,
+    "min": 45.03,
+    "max": 47.1903,
+    "cv_pct": 1.9708532466227195
+  },
+  "memvanta_tg": {
+    "mean": 24.8255,
+    "sd": 0.0679018409176062,
+    "median": 24.8154,
+    "min": 24.7386,
+    "max": 24.898,
+    "cv_pct": 0.2735165089025647
+  },
+  "llama_pp": {
+    "mean": 186.9804,
+    "sd": 0.7714290634919078,
+    "median": 187.278,
+    "min": 185.768,
+    "max": 187.692,
+    "cv_pct": 0.41257215381500295
+  },
+  "llama_tg": {
+    "mean": 110.875,
+    "sd": 0.22294954586183718,
+    "median": 110.849,
+    "min": 110.658,
+    "max": 111.228,
+    "cv_pct": 0.20108189029252507
+  },
+  "memvanta_peak_rss_kib": 266700,
+  "llama_peak_rss_kib": 448936,
+  "memvanta_vs_llama_pp_ratio": 0.2493109438208497,
+  "memvanta_vs_llama_tg_ratio": 0.22390529875986473,
+  "memvanta_rss_reduction_pct": 40.59286847122975
+}
