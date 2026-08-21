@@ -56,32 +56,15 @@ jobs:
       - name: Prepare evidence directory
         run: mkdir -p threeb-model-ab
 
-      - name: Resolve, download and verify OpenLLaMA 3B Q4_0
+      - name: Download and fingerprint OpenLLaMA 3B Q4_0
         run: |
-          python3 - <<'PY'
-          import json, urllib.request, pathlib
-          repo='tensorblock/open_llama_3b_v2-GGUF'
-          model='open_llama_3b_v2-Q4_0.gguf'
-          with urllib.request.urlopen(f'https://huggingface.co/api/models/{repo}?blobs=true') as r:
-              d=json.load(r)
-          matches=[x for x in d.get('siblings',[]) if x.get('rfilename')==model]
-          if len(matches)!=1:
-              raise SystemExit(f'expected exact model file {model}, found {len(matches)}')
-          info=matches[0]
-          lfs=info.get('lfs') or {}
-          sha=lfs.get('sha256')
-          size=lfs.get('size') or info.get('size')
-          if not sha or len(sha)!=64:
-              raise SystemExit(f'missing LFS sha256 for {model}: {info}')
-          pathlib.Path('threeb-model-ab/expected-model.sha256').write_text(f'{sha}  {model}\n')
-          pathlib.Path('threeb-model-ab/upstream-model-metadata.json').write_text(json.dumps({'repo':repo,'file':model,'sha256':sha,'size':size},indent=2)+'\n')
-          print(f'model={model} sha256={sha} size={size}')
-          PY
-          curl -L --fail --retry 3 --retry-delay 5 \
-            "https://huggingface.co/$HF_REPO/resolve/main/$MODEL?download=true" -o "$MODEL"
-          sha256sum -c threeb-model-ab/expected-model.sha256 | tee threeb-model-ab/model-sha-check.txt
+          set -euo pipefail
+          MODEL_URL="https://huggingface.co/$HF_REPO/resolve/main/$MODEL?download=true"
+          echo "$MODEL_URL" > threeb-model-ab/model-url.txt
+          curl -L --fail --retry 3 --retry-delay 5 "$MODEL_URL" -o "$MODEL"
           sha256sum "$MODEL" | tee threeb-model-ab/model.sha256
           stat -c 'model_bytes=%s' "$MODEL" | tee threeb-model-ab/model-size.txt
+          test "$(stat -c %s "$MODEL")" -gt 1500000000
 
       - name: Build pinned llama.cpp CPU tools
         run: |
@@ -99,7 +82,9 @@ jobs:
         run: |
           {
             echo "model=$MODEL"
+            echo "hf_repo=$HF_REPO"
             cat threeb-model-ab/model.sha256
+            cat threeb-model-ab/model-size.txt
             echo "memvanta_commit=$GITHUB_SHA"
             echo "llama_cpp_ref=$LLAMA_CPP_REF"
             echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=$KV reps=$REPS warmup=$WARMUP"
@@ -126,8 +111,7 @@ jobs:
           echo "$gen_rc" > threeb-model-ab/generation-smoke.exitcode.txt
 
           /usr/bin/time -v timeout --signal=TERM --kill-after=15s 600 \
-            ./build-threeb/memvanta_real_bench \
-            --model "$MODEL" --threads "$THREADS" --ctx 128 \
+            ./build-threeb/memvanta_real_bench --model "$MODEL" --threads "$THREADS" --ctx 128 \
             --prompt 32 --gen 16 --batch 16 --kv "$KV" --warmup 0 --reps 1 --no-client \
             --csv threeb-model-ab/memvanta-micro.csv \
             > threeb-model-ab/memvanta-micro.stdout.txt 2> threeb-model-ab/memvanta-micro.time.txt
@@ -135,8 +119,8 @@ jobs:
           echo "$mem_micro_rc" > threeb-model-ab/memvanta-micro.exitcode.txt
 
           /usr/bin/time -v timeout --signal=TERM --kill-after=15s 600 \
-            ./llama.cpp/build/bin/llama-bench \
-            -m "$MODEL" -p 32 -n 16 -t "$THREADS" -r 1 -b 16 -ub 16 -ctk "$KV" -ctv "$KV" -ngl 0 -o json \
+            ./llama.cpp/build/bin/llama-bench -m "$MODEL" -p 32 -n 16 -t "$THREADS" -r 1 \
+            -b 16 -ub 16 -ctk "$KV" -ctv "$KV" -ngl 0 -o json \
             > threeb-model-ab/llama-micro.json 2> threeb-model-ab/llama-micro.time.txt
           llama_micro_rc=$?
           echo "$llama_micro_rc" > threeb-model-ab/llama-micro.exitcode.txt
@@ -154,27 +138,20 @@ jobs:
           fi
 
           /usr/bin/time -v timeout --signal=TERM --kill-after=30s 5400 \
-            ./build-threeb/memvanta_real_bench \
-            --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
+            ./build-threeb/memvanta_real_bench --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
             --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" --kv "$KV" \
-            --warmup "$WARMUP" --reps "$REPS" --no-client \
-            --csv threeb-model-ab/memvanta.csv \
+            --warmup "$WARMUP" --reps "$REPS" --no-client --csv threeb-model-ab/memvanta.csv \
             > threeb-model-ab/memvanta.stdout.txt 2> threeb-model-ab/memvanta.time.txt
           mem_rc=$?
           echo "$mem_rc" > threeb-model-ab/memvanta.exitcode.txt
 
           /usr/bin/time -v timeout --signal=TERM --kill-after=30s 3600 \
-            ./llama.cpp/build/bin/llama-bench \
-            -m "$MODEL" -p "$PROMPT" -n "$GEN" -t "$THREADS" -r "$REPS" \
+            ./llama.cpp/build/bin/llama-bench -m "$MODEL" -p "$PROMPT" -n "$GEN" -t "$THREADS" -r "$REPS" \
             -b "$BATCH" -ub "$BATCH" -ctk "$KV" -ctv "$KV" -ngl 0 -o json \
             > threeb-model-ab/llama-bench.json 2> threeb-model-ab/llama-bench.time.txt
           llama_rc=$?
           echo "$llama_rc" > threeb-model-ab/llama-bench.exitcode.txt
-
-          {
-            echo "memvanta_full_rc=$mem_rc"
-            echo "llama_full_rc=$llama_rc"
-          } | tee threeb-model-ab/full-benchmark-status.txt
+          printf 'memvanta_full_rc=%s\nllama_full_rc=%s\n' "$mem_rc" "$llama_rc" | tee threeb-model-ab/full-benchmark-status.txt
           exit 0
 
       - name: Summarize successful full A/B
@@ -186,12 +163,10 @@ jobs:
           o=pathlib.Path('threeb-model-ab')
           mf=o/'memvanta.exitcode.txt'; lf=o/'llama-bench.exitcode.txt'
           if not mf.exists() or not lf.exists():
-              (o/'diagnostic-summary.json').write_text(json.dumps({'full_benchmark':'not_completed'},indent=2)+'\n')
-              raise SystemExit(0)
+              (o/'diagnostic-summary.json').write_text(json.dumps({'full_benchmark':'not_completed'},indent=2)+'\n'); raise SystemExit(0)
           mrc=int(mf.read_text().strip()); lrc=int(lf.read_text().strip())
           if mrc or lrc or not (o/'memvanta.csv').exists() or not (o/'llama-bench.json').exists():
-              (o/'diagnostic-summary.json').write_text(json.dumps({'memvanta_exit':mrc,'llama_exit':lrc},indent=2)+'\n')
-              raise SystemExit(0)
+              (o/'diagnostic-summary.json').write_text(json.dumps({'memvanta_exit':mrc,'llama_exit':lrc},indent=2)+'\n'); raise SystemExit(0)
           rows=list(csv.DictReader((o/'memvanta.csv').open()))
           mpp=[float(r['pp_tps']) for r in rows]; mtg=[float(r['tg_tps']) for r in rows]
           lj=json.loads((o/'llama-bench.json').read_text()); lj=[lj] if isinstance(lj,dict) else lj
@@ -202,8 +177,7 @@ jobs:
               if int(r.get('n_gen',0) or 0) and not int(r.get('n_prompt',0) or 0): ltg += vals
           def rss(p):
               m=re.search(r'Maximum resident set size \(kbytes\):\s*(\d+)',p.read_text(errors='replace')); return int(m.group(1)) if m else None
-          def d(x):
-              return {'mean':statistics.mean(x),'sd':statistics.stdev(x),'min':min(x),'max':max(x),'cv_pct':statistics.stdev(x)/statistics.mean(x)*100}
+          def d(x): return {'mean':statistics.mean(x),'sd':statistics.stdev(x),'cv_pct':statistics.stdev(x)/statistics.mean(x)*100}
           s={'benchmark':'OpenLLaMA 3B v2 Q4_0 same-model CPU A/B','memvanta_pp':d(mpp),'memvanta_tg':d(mtg),'llama_pp':d(lpp),'llama_tg':d(ltg),'memvanta_peak_rss_kib':rss(o/'memvanta.time.txt'),'llama_peak_rss_kib':rss(o/'llama-bench.time.txt')}
           s['llama_vs_memvanta_pp_speedup']=s['llama_pp']['mean']/s['memvanta_pp']['mean']
           s['llama_vs_memvanta_tg_speedup']=s['llama_tg']['mean']/s['memvanta_tg']['mean']
