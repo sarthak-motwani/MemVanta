@@ -1,15 +1,21 @@
-runtime,limit_mib,exit_code,result,memory_peak_bytes
-memvanta,1024,2,failed_or_oom,262144
-llama,1024,1,failed_or_oom,339968
-memvanta,896,2,failed_or_oom,516096
-llama,896,1,failed_or_oom,262144
-memvanta,768,2,failed_or_oom,262144
-llama,768,1,failed_or_oom,516096
-memvanta,704,2,failed_or_oom,262144
-llama,704,1,failed_or_oom,262144
-memvanta,640,2,failed_or_oom,262144
-llama,640,1,failed_or_oom,262144
-memvanta,576,2,failed_or_oom,262144
-llama,576,1,failed_or_oom,262144
-memvanta,512,2,failed_or_oom,516096
-llama,512,1,failed_or_oom,262144
+runtime,limit_mib,launcher_exit,exec_exit,result,memory_peak_bytes,service_result
+memvanta,1536,0,0,success,[not set],success
+llama,1536,0,0,success,[not set],success
+memvanta,1280,0,0,success,[not set],success
+llama,1280,0,0,success,[not set],success
+memvanta,1152,0,0,success,[not set],success
+llama,1152,0,0,success,[not set],success
+memvanta,1024,0,0,success,[not set],success
+llama,1024,0,0,success,[not set],success
+memvanta,896,0,0,success,[not set],success
+llama,896,0,0,success,[not set],success
+memvanta,768,0,0,success,[not set],success
+llama,768,0,0,success,[not set],success
+memvanta,704,0,0,success,[not set],success
+llama,704,0,0,success,[not set],success
+memvanta,640,0,0,success,[not set],success
+llama,640,0,0,success,[not set],success
+memvanta,576,0,0,success,[not set],success
+llama,576,1,9,oom,603979776,oom-kill
+memvanta,512,0,0,success,[not set],success
+llama,512,1,9,oom,536870912,oom-kill

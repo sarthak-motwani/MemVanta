@@ -1,9 +1,10 @@
 # TinyLlama 1.1B RAM-constrained experiment
 
-> **Invalid / superseded run. Do not use these numbers as benchmark evidence.**
->
-> Run `32451307562` used `systemd-run` without entering the repository working directory. The benchmark executables therefore did not actually execute under the requested memory ceilings; the tiny recorded `MemoryPeak` values confirm the harness failure.
+Linux cgroup-v2 `MemoryMax` sweep with swap disabled. Same Q4_0 GGUF, CPU-only, 4 threads, pp128/tg32, context 768, batch 32, F16 KV.
 
-A corrected cgroup-v2 `MemoryMax` workflow has been committed and is rerunning the experiment with an explicit working directory, captured service status, a valid high-memory baseline requirement, and an expanded 1536→512 MiB sweep.
+- MemVanta lowest successful limit: 512 MiB
+- llama.cpp lowest successful limit: 640 MiB
+- Boundary difference: 128 MiB
+- MemVanta lower successful memory ceiling: 20.00%
 
-The next successful publication will replace this directory with valid evidence.
+This is an execution-under-pressure boundary test, not a throughput benchmark. Full per-limit outcomes are in `results.csv`.
