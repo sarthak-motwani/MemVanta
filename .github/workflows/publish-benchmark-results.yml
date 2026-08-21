@@ -5,6 +5,7 @@ on:
     workflows:
       - Real Model Validation
       - Medium Model Validation
+      - Medium Model A/B
     types: [completed]
 
 permissions:
@@ -50,6 +51,9 @@ jobs:
           elif [ "$WORKFLOW_NAME" = "Medium Model Validation" ]; then
             SRC="downloaded-evidence/memvanta-smollm2-360m-evidence"
             DEST="results/smollm2-360m"
+          elif [ "$WORKFLOW_NAME" = "Medium Model A/B" ]; then
+            SRC="downloaded-evidence/memvanta-smollm2-360m-ab"
+            DEST="results/smollm2-360m-ab"
           else
             echo "Unsupported workflow: $WORKFLOW_NAME" >&2
             exit 1
@@ -81,9 +85,6 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Benchmark evidence intentionally contains extensions ignored for normal
-          # development (for example *.time.txt). Force-add results so the
-          # published tree exactly mirrors the successful workflow artifact.
           git add -f results/
           if git diff --cached --quiet; then
             echo "No evidence changes to commit"
