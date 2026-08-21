@@ -1,0 +1,2 @@
+[MemVanta real GGUF] prompt tokens=6 model=Models
+ Paris, the second largest city of France
