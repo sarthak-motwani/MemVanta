@@ -72,6 +72,11 @@ jobs:
           cmake --build llama.cpp/build --target llama-bench llama-quantize -j "$(nproc)"
           git -C llama.cpp rev-parse HEAD | tee threeb-model-ab/llama_cpp_commit.txt
 
+      - name: Install pinned llama.cpp converter requirements
+        run: |
+          python3 -m pip install --break-system-packages \
+            -r llama.cpp/requirements/requirements-convert_hf_to_gguf.txt
+
       - name: Resolve and download official OpenLLaMA 3B v2 source
         run: |
           set -euo pipefail
