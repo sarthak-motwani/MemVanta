@@ -23,23 +23,30 @@ env:
 
 jobs:
   tune-ffn:
+    name: OpenLLaMA 7B FFN tuning
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build curl time ccache
+
       - name: Build profiler
         run: |
           cmake -S . -B build-tune -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-tune --target memvanta_profile memvanta_tests memvanta_tokenizer_tests -j "$(nproc)"
           ctest --test-dir build-tune --output-on-failure
+
       - name: Download exact 7B GGUF
         run: |
+          set -euo pipefail
           curl -L --fail --retry 3 --retry-delay 3 "$MODEL_URL" -o "$MODEL"
           echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+
       - name: Run FFN tuning sweep
         run: |
           set -euo pipefail
@@ -48,33 +55,61 @@ jobs:
           for mode in fp32 q8act; do
             for batch in 16 32 64; do
               out="sevenb-ffn-tuning/${mode}-b${batch}.txt"
-              if [ "$mode" = q8act ]; then export MEMVANTA_FORCE_Q8_ACT=1; else unset MEMVANTA_FORCE_Q8_ACT || true; fi
-              ./build-tune/memvanta_profile --model "$MODEL" --threads "$THREADS" --ctx "$CTX" --prompt "$PROMPT" --gen "$GEN" --batch "$batch" --csv "sevenb-ffn-tuning/${mode}-b${batch}.csv" > "$out"
+              if [ "$mode" = q8act ]; then
+                export MEMVANTA_FORCE_Q8_ACT=1
+              else
+                unset MEMVANTA_FORCE_Q8_ACT || true
+              fi
+              ./build-tune/memvanta_profile \
+                --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
+                --prompt "$PROMPT" --gen "$GEN" --batch "$batch" \
+                --csv "sevenb-ffn-tuning/${mode}-b${batch}.csv" > "$out"
               python3 - "$mode" "$batch" "$out" <<'PY'
-import re,sys,pathlib
-mode,batch,path=sys.argv[1:]
-s=pathlib.Path(path).read_text()
-def v(k):
- m=re.search(rf'\b{k}=([0-9.]+)',s); return float(m.group(1)) if m else 0.0
-pre=v('prefill_ms'); dec=v('decode_total_ms'); ffn=v('ffn_gemm_ms'); qkv=v('qkv_projection_ms')
-with open('sevenb-ffn-tuning/results.csv','a') as f:
- f.write(f'{mode},{batch},{pre:.6f},{dec:.6f},{ffn:.6f},{qkv:.6f},{pre+dec:.6f}\n')
-PY
+          import re, sys, pathlib
+          mode, batch, path = sys.argv[1:]
+          s = pathlib.Path(path).read_text()
+          def value(key):
+              m = re.search(rf'\b{key}=([0-9.]+)', s)
+              return float(m.group(1)) if m else 0.0
+          pre = value('prefill_ms')
+          dec = value('decode_total_ms')
+          ffn = value('ffn_gemm_ms')
+          qkv = value('qkv_projection_ms')
+          with open('sevenb-ffn-tuning/results.csv', 'a') as f:
+              f.write(f'{mode},{batch},{pre:.6f},{dec:.6f},{ffn:.6f},{qkv:.6f},{pre+dec:.6f}\n')
+          PY
             done
           done
-          python3 - <<'PY'
-import csv,pathlib
-p=pathlib.Path('sevenb-ffn-tuning/results.csv')
-rows=list(csv.DictReader(p.open()))
-rows.sort(key=lambda r: float(r['total_ms']))
-best=rows[0]
-lines=['# OpenLLaMA 7B FFN tuning','', 'Exact verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg16, F16 KV.','', '| Mode | Batch | Prefill ms | Decode ms | FFN ms | QKV ms | Total ms |','|---|---:|---:|---:|---:|---:|---:|']
-for r in rows:
- lines.append(f"| {r['mode']} | {r['batch']} | {float(r['prefill_ms']):.2f} | {float(r['decode_ms']):.2f} | {float(r['ffn_ms']):.2f} | {float(r['qkv_ms']):.2f} | {float(r['total_ms']):.2f} |")
-lines += ['', f"Best measured configuration: **{best['mode']} activation path, batch {best['batch']}**.", '', 'This is a tuning experiment, not a llama.cpp comparison claim.']
-pathlib.Path('sevenb-ffn-tuning/SUMMARY.md').write_text('\n'.join(lines)+'\n')
-print(pathlib.Path('sevenb-ffn-tuning/SUMMARY.md').read_text())
-PY
+          python3 <<'PY'
+          import csv, pathlib
+          p = pathlib.Path('sevenb-ffn-tuning/results.csv')
+          rows = list(csv.DictReader(p.open()))
+          rows.sort(key=lambda r: float(r['total_ms']))
+          best = rows[0]
+          lines = [
+              '# OpenLLaMA 7B FFN tuning',
+              '',
+              'Exact verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg16, F16 KV.',
+              '',
+              '| Mode | Batch | Prefill ms | Decode ms | FFN ms | QKV ms | Total ms |',
+              '|---|---:|---:|---:|---:|---:|---:|',
+          ]
+          for r in rows:
+              lines.append(
+                  f"| {r['mode']} | {r['batch']} | {float(r['prefill_ms']):.2f} | "
+                  f"{float(r['decode_ms']):.2f} | {float(r['ffn_ms']):.2f} | "
+                  f"{float(r['qkv_ms']):.2f} | {float(r['total_ms']):.2f} |"
+              )
+          lines += [
+              '',
+              f"Best measured configuration: **{best['mode']} activation path, batch {best['batch']}**.",
+              '',
+              'This is a tuning experiment, not a llama.cpp comparison claim.',
+          ]
+          pathlib.Path('sevenb-ffn-tuning/SUMMARY.md').write_text('\n'.join(lines) + '\n')
+          print(pathlib.Path('sevenb-ffn-tuning/SUMMARY.md').read_text())
+          PY
+
       - name: Upload tuning evidence
         if: always()
         uses: actions/upload-artifact@v4
