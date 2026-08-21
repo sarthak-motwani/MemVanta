@@ -15,8 +15,11 @@ permissions:
   contents: read
 
 env:
-  HF_REPO: tensorblock/open_llama_3b_v2-GGUF
-  MODEL: open_llama_3b_v2-Q4_0.gguf
+  HF_REPO: klosax/openllama-3b-v2-gguf
+  HF_REV: ab010e7a11732f21baf74675c61f6482f65232f4
+  MODEL: openllama-3b-v2-q4_0.gguf
+  MODEL_SHA256: d129ff53c9451490144ec24ad4bb690eff51a6c32d21905b37cb9921da756a26
+  MODEL_BYTES: '1928625664'
   THREADS: 4
   CTX: 768
   PROMPT: 512
@@ -56,15 +59,18 @@ jobs:
       - name: Prepare evidence directory
         run: mkdir -p threeb-model-ab
 
-      - name: Download and fingerprint OpenLLaMA 3B Q4_0
+      - name: Download and verify pinned OpenLLaMA 3B Q4_0
         run: |
           set -euo pipefail
-          MODEL_URL="https://huggingface.co/$HF_REPO/resolve/main/$MODEL?download=true"
+          MODEL_URL="https://huggingface.co/$HF_REPO/resolve/$HF_REV/$MODEL?download=true"
           echo "$MODEL_URL" > threeb-model-ab/model-url.txt
+          echo "$MODEL_SHA256  $MODEL" > threeb-model-ab/expected-model.sha256
           curl -L --fail --retry 3 --retry-delay 5 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c - | tee threeb-model-ab/model-sha-check.txt
+          actual_bytes="$(stat -c %s "$MODEL")"
+          echo "model_bytes=$actual_bytes" | tee threeb-model-ab/model-size.txt
+          test "$actual_bytes" -eq "$MODEL_BYTES"
           sha256sum "$MODEL" | tee threeb-model-ab/model.sha256
-          stat -c 'model_bytes=%s' "$MODEL" | tee threeb-model-ab/model-size.txt
-          test "$(stat -c %s "$MODEL")" -gt 1500000000
 
       - name: Build pinned llama.cpp CPU tools
         run: |
@@ -83,6 +89,7 @@ jobs:
           {
             echo "model=$MODEL"
             echo "hf_repo=$HF_REPO"
+            echo "hf_revision=$HF_REV"
             cat threeb-model-ab/model.sha256
             cat threeb-model-ab/model-size.txt
             echo "memvanta_commit=$GITHUB_SHA"
