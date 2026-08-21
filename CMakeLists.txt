@@ -12,6 +12,7 @@ add_library(memvanta_core
     src/runtime.cpp
     src/matmul.cpp
     src/quant.cpp
+    src/quant_kernels.cpp
     src/llama2.cpp
     src/gguf.cpp
     src/gguf_kernels.cpp
