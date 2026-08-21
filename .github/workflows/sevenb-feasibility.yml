@@ -1,0 +1,232 @@
+name: Seven Billion Feasibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sevenb-feasibility.yml'
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+
+permissions:
+  contents: read
+
+env:
+  HF_REPO: maddes8cht/openlm-research-open_llama_7b_v2-gguf
+  MODEL: openlm-research-open_llama_7b_v2-Q4_0.gguf
+  MODEL_SHA256: 892f6e2e840ed98bb7bc1d74da67ae0cca52b2d90b0316d0a7e66a37a5a60760
+  THREADS: 4
+  CTX: 768
+  PROMPT: 512
+  GEN: 128
+  BATCH: 32
+  KV: f16
+  LLAMA_CPP_REF: 6503355df0eb4f65875012523263c302fe0088c1
+  OMP_NUM_THREADS: 4
+  OMP_DYNAMIC: 'FALSE'
+  OMP_PROC_BIND: close
+  OMP_PLACES: cores
+  MALLOC_ARENA_MAX: 2
+
+jobs:
+  openllama-7b-feasibility:
+    name: OpenLLaMA 7B v2 Q4_0 feasibility gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout MemVanta
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl git time ccache python3
+
+      - name: Build MemVanta
+        run: |
+          cmake -S . -B build-sevenb -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-sevenb -j "$(nproc)"
+          ctest --test-dir build-sevenb --output-on-failure
+
+      - name: Prepare evidence directory
+        run: mkdir -p sevenb-feasibility
+
+      - name: Download and verify OpenLLaMA 7B Q4_0
+        run: |
+          set -euo pipefail
+          MODEL_URL="https://huggingface.co/$HF_REPO/resolve/main/$MODEL?download=true"
+          echo "$MODEL_URL" > sevenb-feasibility/model-url.txt
+          curl -L --fail --retry 3 --retry-delay 5 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+          sha256sum "$MODEL" | tee sevenb-feasibility/model.sha256
+          actual_bytes="$(stat -c %s "$MODEL")"
+          echo "model_bytes=$actual_bytes" | tee sevenb-feasibility/model-size.txt
+          test "$actual_bytes" -gt 3500000000
+          python3 - <<'PY'
+          import pathlib,struct,json
+          p=pathlib.Path('openlm-research-open_llama_7b_v2-Q4_0.gguf')
+          with p.open('rb') as f:
+              magic=f.read(4); raw=f.read(4)
+          if len(raw) != 4:
+              raise SystemExit('truncated GGUF header')
+          version=struct.unpack('<I', raw)[0]
+          info={'magic':magic.decode('ascii','replace'),'gguf_version':version}
+          pathlib.Path('sevenb-feasibility/gguf-header.json').write_text(json.dumps(info,indent=2)+'\n')
+          print(info)
+          if magic != b'GGUF': raise SystemExit('invalid GGUF magic')
+          if version < 2: raise SystemExit(f'obsolete GGUF version {version}; need >= 2')
+          PY
+
+      - name: Build pinned llama.cpp CPU benchmark
+        run: |
+          set -euo pipefail
+          git init llama.cpp
+          git -C llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C llama.cpp fetch --depth 1 origin "$LLAMA_CPP_REF"
+          git -C llama.cpp checkout --detach FETCH_HEAD
+          cmake -S llama.cpp -B llama.cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_CUDA=OFF -DGGML_METAL=OFF -DLLAMA_CURL=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build llama.cpp/build --target llama-bench -j "$(nproc)"
+          git -C llama.cpp rev-parse HEAD | tee sevenb-feasibility/llama_cpp_commit.txt
+
+      - name: Record provenance
+        run: |
+          {
+            echo "model=$MODEL"
+            echo "hf_repo=$HF_REPO"
+            cat sevenb-feasibility/model.sha256
+            cat sevenb-feasibility/model-size.txt
+            cat sevenb-feasibility/gguf-header.json
+            echo "memvanta_commit=$GITHUB_SHA"
+            echo "llama_cpp_ref=$LLAMA_CPP_REF"
+            echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=$KV"
+            uname -a
+            lscpu
+            free -h
+            df -h .
+          } > sevenb-feasibility/environment.txt
+
+      - name: Run compatibility and single-run feasibility gate
+        continue-on-error: true
+        run: |
+          set +e
+
+          ./build-sevenb/memvanta_tokenize "$MODEL" 'The capital of France is' --bos \
+            > sevenb-feasibility/tokenizer-smoke.txt 2> sevenb-feasibility/tokenizer-smoke.stderr.txt
+          tok_rc=$?
+          echo "$tok_rc" > sevenb-feasibility/tokenizer-smoke.exitcode.txt
+
+          timeout --signal=TERM --kill-after=15s 600 \
+            ./build-sevenb/memvanta_real --model "$MODEL" --threads "$THREADS" --ctx 128 \
+            --temperature 0 --n 2 --prompt 'The capital of France is' \
+            > sevenb-feasibility/generation-smoke.txt 2> sevenb-feasibility/generation-smoke.stderr.txt
+          gen_rc=$?
+          echo "$gen_rc" > sevenb-feasibility/generation-smoke.exitcode.txt
+
+          /usr/bin/time -v timeout --signal=TERM --kill-after=15s 1200 \
+            ./build-sevenb/memvanta_real_bench --model "$MODEL" --threads "$THREADS" --ctx 128 \
+            --prompt 32 --gen 16 --batch 16 --kv "$KV" --warmup 0 --reps 1 --no-client \
+            --csv sevenb-feasibility/memvanta-micro.csv \
+            > sevenb-feasibility/memvanta-micro.stdout.txt 2> sevenb-feasibility/memvanta-micro.time.txt
+          mem_micro_rc=$?
+          echo "$mem_micro_rc" > sevenb-feasibility/memvanta-micro.exitcode.txt
+
+          /usr/bin/time -v timeout --signal=TERM --kill-after=15s 1200 \
+            ./llama.cpp/build/bin/llama-bench -m "$MODEL" -p 32 -n 16 -t "$THREADS" -r 1 \
+            -b 16 -ub 16 -ctk "$KV" -ctv "$KV" -ngl 0 -o json \
+            > sevenb-feasibility/llama-micro.json 2> sevenb-feasibility/llama-micro.time.txt
+          llama_micro_rc=$?
+          echo "$llama_micro_rc" > sevenb-feasibility/llama-micro.exitcode.txt
+
+          {
+            echo "tokenizer_rc=$tok_rc"
+            echo "generation_rc=$gen_rc"
+            echo "memvanta_micro_rc=$mem_micro_rc"
+            echo "llama_micro_rc=$llama_micro_rc"
+          } | tee sevenb-feasibility/compatibility-status.txt
+
+          if [ "$tok_rc" -ne 0 ] || [ "$gen_rc" -ne 0 ] || [ "$mem_micro_rc" -ne 0 ] || [ "$llama_micro_rc" -ne 0 ]; then
+            echo "full_validation=skipped_after_compatibility_failure" | tee sevenb-feasibility/full-validation-status.txt
+            exit 0
+          fi
+
+          /usr/bin/time -v timeout --signal=TERM --kill-after=30s 3600 \
+            ./build-sevenb/memvanta_real_bench --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
+            --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" --kv "$KV" \
+            --warmup 0 --reps 1 --no-client --csv sevenb-feasibility/memvanta.csv \
+            > sevenb-feasibility/memvanta.stdout.txt 2> sevenb-feasibility/memvanta.time.txt
+          mem_rc=$?
+          echo "$mem_rc" > sevenb-feasibility/memvanta.exitcode.txt
+
+          /usr/bin/time -v timeout --signal=TERM --kill-after=30s 2400 \
+            ./llama.cpp/build/bin/llama-bench -m "$MODEL" -p "$PROMPT" -n "$GEN" -t "$THREADS" -r 1 \
+            -b "$BATCH" -ub "$BATCH" -ctk "$KV" -ctv "$KV" -ngl 0 -o json \
+            > sevenb-feasibility/llama-bench.json 2> sevenb-feasibility/llama-bench.time.txt
+          llama_rc=$?
+          echo "$llama_rc" > sevenb-feasibility/llama-bench.exitcode.txt
+          printf 'memvanta_full_rc=%s\nllama_full_rc=%s\n' "$mem_rc" "$llama_rc" | tee sevenb-feasibility/full-validation-status.txt
+          exit 0
+
+      - name: Summarize feasibility result
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 - <<'PY'
+          import csv,json,pathlib,re
+          o=pathlib.Path('sevenb-feasibility')
+          mf=o/'memvanta.exitcode.txt'; lf=o/'llama-bench.exitcode.txt'
+          if not mf.exists() or not lf.exists():
+              (o/'diagnostic-summary.json').write_text(json.dumps({'full_validation':'not_completed'},indent=2)+'\n'); raise SystemExit(0)
+          mrc=int(mf.read_text().strip()); lrc=int(lf.read_text().strip())
+          if mrc or lrc or not (o/'memvanta.csv').exists() or not (o/'llama-bench.json').exists():
+              (o/'diagnostic-summary.json').write_text(json.dumps({'memvanta_exit':mrc,'llama_exit':lrc},indent=2)+'\n'); raise SystemExit(0)
+          rows=list(csv.DictReader((o/'memvanta.csv').open()))
+          mpp=float(rows[0]['pp_tps']); mtg=float(rows[0]['tg_tps'])
+          lj=json.loads((o/'llama-bench.json').read_text()); lj=[lj] if isinstance(lj,dict) else lj
+          lpp=ltg=None
+          for r in lj:
+              v=r.get('avg_ts')
+              if v is None and r.get('samples_ts'): v=r['samples_ts'][0]
+              if int(r.get('n_prompt',0) or 0) and not int(r.get('n_gen',0) or 0): lpp=float(v)
+              if int(r.get('n_gen',0) or 0) and not int(r.get('n_prompt',0) or 0): ltg=float(v)
+          def rss(p):
+              m=re.search(r'Maximum resident set size \(kbytes\):\s*(\d+)',p.read_text(errors='replace')); return int(m.group(1)) if m else None
+          mr=rss(o/'memvanta.time.txt'); lr=rss(o/'llama-bench.time.txt')
+          s={'benchmark':'OpenLLaMA 7B v2 Q4_0 single-run feasibility','memvanta_pp_tps':mpp,'llama_pp_tps':lpp,'memvanta_tg_tps':mtg,'llama_tg_tps':ltg,'memvanta_peak_rss_kib':mr,'llama_peak_rss_kib':lr}
+          if mr and lr: s['memvanta_rss_reduction_pct']=(1-mr/lr)*100
+          (o/'summary.json').write_text(json.dumps(s,indent=2)+'\n')
+          (o/'SUMMARY.md').write_text('# OpenLLaMA 7B v2 Q4_0 feasibility\n\nThis is a single-run feasibility check, not a repeated benchmark claim.\n\n'+f"- MemVanta pp: {mpp:.2f} tok/s\n- llama.cpp pp: {lpp:.2f} tok/s\n- MemVanta tg: {mtg:.2f} tok/s\n- llama.cpp tg: {ltg:.2f} tok/s\n- MemVanta peak RSS: {mr} KiB\n- llama.cpp peak RSS: {lr} KiB\n"+(f"- MemVanta RSS reduction: {s['memvanta_rss_reduction_pct']:.2f}%\n" if 'memvanta_rss_reduction_pct' in s else ''))
+          print((o/'SUMMARY.md').read_text())
+          PY
+
+      - name: Upload feasibility and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memvanta-sevenb-feasibility
+          path: sevenb-feasibility/**
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce feasibility success after evidence upload
+        if: always()
+        run: |
+          tok_rc="$(cat sevenb-feasibility/tokenizer-smoke.exitcode.txt 2>/dev/null || echo 127)"
+          gen_rc="$(cat sevenb-feasibility/generation-smoke.exitcode.txt 2>/dev/null || echo 127)"
+          mem_micro_rc="$(cat sevenb-feasibility/memvanta-micro.exitcode.txt 2>/dev/null || echo 127)"
+          llama_micro_rc="$(cat sevenb-feasibility/llama-micro.exitcode.txt 2>/dev/null || echo 127)"
+          mem_rc="$(cat sevenb-feasibility/memvanta.exitcode.txt 2>/dev/null || echo 127)"
+          llama_rc="$(cat sevenb-feasibility/llama-bench.exitcode.txt 2>/dev/null || echo 127)"
+          echo "compatibility: tokenizer=$tok_rc generation=$gen_rc memvanta=$mem_micro_rc llama=$llama_micro_rc"
+          echo "full validation: memvanta=$mem_rc llama=$llama_rc"
+          test "$tok_rc" -eq 0
+          test "$gen_rc" -eq 0
+          test "$mem_micro_rc" -eq 0
+          test "$llama_micro_rc" -eq 0
+          test "$mem_rc" -eq 0
+          test "$llama_rc" -eq 0
