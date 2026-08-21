@@ -114,19 +114,6 @@ inline float dot_q8_0_fp32(const GgufBlockQ8_0* blocks,const float*x,std::size_t
     }return sum;
 }
 
-#if defined(__AVX2__)
-inline float hsum256_ps(__m256 v){__m128 lo=_mm256_castps256_ps128(v),hi=_mm256_extractf128_ps(v,1);__m128 s=_mm_add_ps(lo,hi);s=_mm_hadd_ps(s,s);s=_mm_hadd_ps(s,s);return _mm_cvtss_f32(s);}
-#endif
-
-inline void dot_q8_0_fp32_pair(const GgufBlockQ8_0*a0,const GgufBlockQ8_0*a1,const float*x,std::size_t n,float&out0,float&out1){
-#if defined(__AVX2__)
-    const std::size_t nb=n/32;float sum0=0.0f,sum1=0.0f;
-    for(std::size_t b=0;b<nb;++b){__m256 acc0=_mm256_setzero_ps(),acc1=_mm256_setzero_ps();for(int k=0;k<32;k+=8){const __m256 xv=_mm256_loadu_ps(x+b*32+k);const __m128i q80=_mm_loadl_epi64(reinterpret_cast<const __m128i*>(a0[b].qs+k));const __m128i q81=_mm_loadl_epi64(reinterpret_cast<const __m128i*>(a1[b].qs+k));const __m256 qf0=_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(q80));const __m256 qf1=_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(q81));acc0=_mm256_fmadd_ps(qf0,xv,acc0);acc1=_mm256_fmadd_ps(qf1,xv,acc1);}sum0+=hsum256_ps(acc0)*fp16_to_fp32(a0[b].d);sum1+=hsum256_ps(acc1)*fp16_to_fp32(a1[b].d);}out0=sum0;out1=sum1;
-#else
-    out0=dot_q8_0_fp32(a0,x,n);out1=dot_q8_0_fp32(a1,x,n);
-#endif
-}
-
 inline int dot_i8_16(const std::int8_t* a,const std::int8_t* b){
 #if defined(__AVX2__)
     __m128i aa=_mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
@@ -226,7 +213,7 @@ std::uint16_t fp32_to_fp16(float f){std::uint32_t x;std::memcpy(&x,&f,4);std::ui
 void tensor_matvec(const GgufFile&file,const GgufTensor&t,const float*x,float*y,unsigned threads,WorkerPool*pool){
     const auto t0=Clock::now();if(t.dims.size()<2)throw std::runtime_error("matvec requires rank-2 tensor: "+t.name);const std::size_t cols=t.ne(0),rows=t.ne(1);const std::byte*p=file.tensor_data(t);
     if(t.type==GgmlType::Q4_0){if(cols%32)throw std::runtime_error("Q4_0 matrix row not block aligned: "+t.name);auto a=quantize_q8(x,cols);auto*A=reinterpret_cast<const GgufBlockQ4_0*>(p);auto nb=cols/32;parallel_rows(rows,threads,pool,[&](std::size_t r0,std::size_t r1){for(std::size_t r=r0;r<r1;++r)y[r]=dot_q4_q8(A+r*nb,a.q.data(),a.d.data(),nb);});}
-    else if(t.type==GgmlType::Q8_0){auto*A=reinterpret_cast<const GgufBlockQ8_0*>(p);auto nb=cols/32;if(t.name=="output.weight"&&rows>=2){const std::size_t pairs=rows/2;parallel_rows(pairs,threads,pool,[&](std::size_t p0,std::size_t p1){for(std::size_t pr=p0;pr<p1;++pr){const std::size_t r=pr*2;dot_q8_0_fp32_pair(A+r*nb,A+(r+1)*nb,x,cols,y[r],y[r+1]);}});if(rows&1)y[rows-1]=dot_q8_0_fp32(A+(rows-1)*nb,x,cols);}else{parallel_rows(rows,threads,pool,[&](std::size_t r0,std::size_t r1){for(std::size_t r=r0;r<r1;++r)y[r]=dot_q8_0_fp32(A+r*nb,x,cols);});}}
+    else if(t.type==GgmlType::Q8_0){auto*A=reinterpret_cast<const GgufBlockQ8_0*>(p);auto nb=cols/32;parallel_rows(rows,threads,pool,[&](std::size_t r0,std::size_t r1){for(std::size_t r=r0;r<r1;++r)y[r]=dot_q8_0_fp32(A+r*nb,x,cols);});}
     else if(t.type==GgmlType::F32){auto*A=reinterpret_cast<const float*>(p);parallel_rows(rows,threads,pool,[&](std::size_t a,std::size_t b){for(std::size_t r=a;r<b;++r)y[r]=dot_f32_simd(A+r*cols,x,cols);});}
     else if(t.type==GgmlType::F16){auto*A=reinterpret_cast<const std::uint16_t*>(p);parallel_rows(rows,threads,pool,[&](std::size_t a,std::size_t b){for(std::size_t r=a;r<b;++r){double s=0;for(std::size_t c=0;c<cols;++c)s+=double(fp16_to_fp32(A[r*cols+c]))*x[c];y[r]=float(s);}});}
     else throw std::runtime_error("unsupported matvec tensor type "+ggml_type_name(t.type)+": "+t.name);
