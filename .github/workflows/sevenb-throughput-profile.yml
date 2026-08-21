@@ -22,7 +22,7 @@ env:
   CTX: 256
   PROMPT: 128
   GEN: 16
-  BATCH: 32
+  BATCH: 16
   PROFILE_SCHEMA: 1
   OMP_NUM_THREADS: 4
   OMP_DYNAMIC: 'FALSE'
@@ -103,7 +103,7 @@ jobs:
           ranked=sorted(components.items(),key=lambda x:x[1],reverse=True)
           summary={'benchmark':'OpenLLaMA 7B v2 trained-model throughput hotspot profile','values_ms':vals,'ranked_components':[{'component':k,'ms':v,'pct_profiled':100*v/total} for k,v in ranked]}
           (o/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
-          lines=['# OpenLLaMA 7B v2 throughput profile','', 'Exact verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg16, batch 32, F16 KV.','']
+          lines=['# OpenLLaMA 7B v2 throughput profile','', 'Exact verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg16, batch 16, F16 KV.','']
           for x in summary['ranked_components']:
               lines.append(f"- {x['component']}: {x['ms']:.2f} ms ({x['pct_profiled']:.1f}% of profiled component time)")
           lines += ['', 'This profile is for hotspot selection, not a throughput comparison claim.']
