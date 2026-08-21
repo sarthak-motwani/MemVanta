@@ -38,6 +38,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build curl time
 
+      - name: Record benchmark provenance
+        run: |
+          {
+            echo "memvanta_commit=$GITHUB_SHA"
+            echo "runner_os=$RUNNER_OS"
+            echo "runner_arch=$RUNNER_ARCH"
+            uname -a
+            lscpu
+            cmake --version | head -n 1
+            c++ --version | head -n 1
+          } > benchmark-provenance.txt
+          cat benchmark-provenance.txt
+
       - name: Build MemVanta
         run: |
           cmake -S . -B build-v072 -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -72,6 +85,7 @@ jobs:
         with:
           name: memvanta-trained-model-smoke
           path: |
+            benchmark-provenance.txt
             memvanta-tokenizer-smoke.txt
             memvanta-trained-smoke.txt
             memvanta-trained-smoke.stderr.txt
@@ -109,6 +123,29 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build curl git time ccache
+
+      - name: Record benchmark provenance
+        run: |
+          mkdir -p "$OUT"
+          {
+            echo "memvanta_commit=$GITHUB_SHA"
+            echo "runner_os=$RUNNER_OS"
+            echo "runner_arch=$RUNNER_ARCH"
+            echo "llama_cpp_ref=$LLAMA_CPP_REF"
+            echo "threads=$THREADS"
+            echo "context=$CTX"
+            echo "prompt=$PROMPT"
+            echo "generation=$GEN"
+            echo "batch=$BATCH"
+            echo "kv=$KV"
+            echo "warmup=$WARMUP"
+            echo "repetitions=$REPS"
+            uname -a
+            lscpu
+            cmake --version | head -n 1
+            c++ --version | head -n 1
+          } > "$OUT/benchmark-provenance.txt"
+          cat "$OUT/benchmark-provenance.txt"
 
       - name: Configure compiler cache
         run: |
