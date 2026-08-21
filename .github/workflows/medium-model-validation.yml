@@ -41,6 +41,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build curl time
 
+      - name: Record benchmark provenance
+        run: |
+          {
+            echo "memvanta_commit=$GITHUB_SHA"
+            echo "runner_os=$RUNNER_OS"
+            echo "runner_arch=$RUNNER_ARCH"
+            uname -a
+            lscpu
+            cmake --version | head -n 1
+            c++ --version | head -n 1
+          } > benchmark-provenance.txt
+          cat benchmark-provenance.txt
+
       - name: Build and test
         run: |
           cmake -S . -B build-medium -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -82,6 +95,7 @@ jobs:
         with:
           name: memvanta-smollm2-360m-evidence
           path: |
+            benchmark-provenance.txt
             medium-model-size.txt
             medium-tokenizer.txt
             medium-greedy.txt
