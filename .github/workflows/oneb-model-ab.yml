@@ -1,0 +1,158 @@
+name: One Billion Model A/B
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/oneb-model-ab.yml'
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+
+permissions:
+  contents: read
+
+env:
+  HF_REPO: QuantFactory/TinyLlama-1.1B-Chat-v1.0-GGUF
+  THREADS: 4
+  CTX: 768
+  PROMPT: 512
+  GEN: 128
+  BATCH: 32
+  KV: f16
+  REPS: 5
+  WARMUP: 1
+  LLAMA_CPP_REF: 6503355df0eb4f65875012523263c302fe0088c1
+  OMP_NUM_THREADS: 4
+  OMP_DYNAMIC: 'FALSE'
+  OMP_PROC_BIND: close
+  OMP_PLACES: cores
+  MALLOC_ARENA_MAX: 2
+
+jobs:
+  tinyllama-11b-ab:
+    name: TinyLlama 1.1B Q4_0 repeated A/B
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout MemVanta
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl git time ccache python3
+
+      - name: Build MemVanta
+        run: |
+          cmake -S . -B build-oneb -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-oneb -j "$(nproc)"
+          ctest --test-dir build-oneb --output-on-failure
+
+      - name: Resolve, download, and hash Q4_0 GGUF
+        run: |
+          python3 - <<'PY' > model-name.txt
+          import json, urllib.request
+          repo='QuantFactory/TinyLlama-1.1B-Chat-v1.0-GGUF'
+          d=json.load(urllib.request.urlopen('https://huggingface.co/api/models/'+repo))
+          xs=[x['rfilename'] for x in d.get('siblings',[]) if x['rfilename'].lower().endswith('q4_0.gguf')]
+          if len(xs)!=1: raise SystemExit(f'expected one Q4_0 GGUF, found {xs}')
+          print(xs[0])
+          PY
+          MODEL="$(cat model-name.txt)"
+          echo "MODEL=$MODEL" >> "$GITHUB_ENV"
+          curl -L --fail --retry 3 --retry-delay 3 "https://huggingface.co/$HF_REPO/resolve/main/$MODEL?download=true" -o "$MODEL"
+          sha256sum "$MODEL" | tee model.sha256
+          stat -c 'model_bytes=%s' "$MODEL" | tee model-size.txt
+
+      - name: Native tokenizer and generation smoke
+        run: |
+          ./build-oneb/memvanta_tokenize "$MODEL" 'The capital of France is' --bos | tee tokenizer-smoke.txt
+          timeout --signal=TERM --kill-after=20s 900 \
+            ./build-oneb/memvanta_real --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
+            --temperature 0 --n 8 --prompt 'The capital of France is' \
+            > generation-smoke.txt 2> generation-smoke.stderr.txt
+
+      - name: Build pinned llama.cpp CPU tools
+        run: |
+          git init llama.cpp
+          git -C llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C llama.cpp fetch --depth 1 origin "$LLAMA_CPP_REF"
+          git -C llama.cpp checkout --detach FETCH_HEAD
+          cmake -S llama.cpp -B llama.cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_CUDA=OFF -DGGML_METAL=OFF -DLLAMA_CURL=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build llama.cpp/build --target llama-bench -j "$(nproc)"
+
+      - name: Record provenance
+        run: |
+          mkdir -p oneb-model-ab
+          {
+            echo "model=$MODEL"
+            cat model.sha256
+            cat model-size.txt
+            echo "hf_repo=$HF_REPO"
+            echo "memvanta_commit=$GITHUB_SHA"
+            echo "llama_cpp_ref=$LLAMA_CPP_REF"
+            echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=$KV reps=$REPS warmup=$WARMUP"
+            uname -a
+            lscpu
+            free -h
+          } > oneb-model-ab/environment.txt
+
+      - name: Run MemVanta repeated benchmark
+        run: |
+          /usr/bin/time -v ./build-oneb/memvanta_real_bench \
+            --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
+            --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" --kv "$KV" \
+            --warmup "$WARMUP" --reps "$REPS" --no-client \
+            --csv oneb-model-ab/memvanta.csv \
+            > oneb-model-ab/memvanta.stdout.txt 2> oneb-model-ab/memvanta.time.txt
+
+      - name: Run llama.cpp repeated benchmark
+        run: |
+          /usr/bin/time -v ./llama.cpp/build/bin/llama-bench \
+            -m "$MODEL" -p "$PROMPT" -n "$GEN" -t "$THREADS" -r "$REPS" \
+            -b "$BATCH" -ub "$BATCH" -ctk "$KV" -ctv "$KV" -ngl 0 -o json \
+            > oneb-model-ab/llama-bench.json 2> oneb-model-ab/llama-bench.time.txt
+
+      - name: Summarize A/B
+        run: |
+          python3 - <<'PY'
+          import csv,json,pathlib,re,statistics
+          o=pathlib.Path('oneb-model-ab')
+          rows=list(csv.DictReader((o/'memvanta.csv').open()))
+          mpp=[float(r['pp_tps']) for r in rows]; mtg=[float(r['tg_tps']) for r in rows]
+          lj=json.loads((o/'llama-bench.json').read_text()); lj=[lj] if isinstance(lj,dict) else lj
+          lpp=[];ltg=[]
+          for r in lj:
+            vals=[float(x) for x in (r.get('samples_ts') or [r.get('avg_ts')]) if x is not None]
+            if int(r.get('n_prompt',0) or 0) and not int(r.get('n_gen',0) or 0): lpp+=vals
+            if int(r.get('n_gen',0) or 0) and not int(r.get('n_prompt',0) or 0): ltg+=vals
+          def rss(p):
+            m=re.search(r'Maximum resident set size \(kbytes\):\s*(\d+)',p.read_text(errors='replace')); return int(m.group(1)) if m else None
+          def d(x): return {'mean':statistics.mean(x),'sd':statistics.stdev(x),'min':min(x),'max':max(x),'cv_pct':statistics.stdev(x)/statistics.mean(x)*100}
+          s={'benchmark':'TinyLlama 1.1B Q4_0 same-model CPU A/B','memvanta_pp':d(mpp),'memvanta_tg':d(mtg),'llama_pp':d(lpp),'llama_tg':d(ltg),'memvanta_peak_rss_kib':rss(o/'memvanta.time.txt'),'llama_peak_rss_kib':rss(o/'llama-bench.time.txt')}
+          s['llama_vs_memvanta_pp_speedup']=s['llama_pp']['mean']/s['memvanta_pp']['mean']
+          s['llama_vs_memvanta_tg_speedup']=s['llama_tg']['mean']/s['memvanta_tg']['mean']
+          s['memvanta_rss_reduction_pct']=(1-s['memvanta_peak_rss_kib']/s['llama_peak_rss_kib'])*100
+          (o/'summary.json').write_text(json.dumps(s,indent=2)+'\n')
+          (o/'SUMMARY.md').write_text(f"# TinyLlama 1.1B Q4_0 — MemVanta vs llama.cpp\n\nSame GGUF, CPU-only, 4 threads, pp512/tg128, context 768, batch 32, F16 KV, 5 repetitions.\n\n- MemVanta pp: {s['memvanta_pp']['mean']:.2f} ± {s['memvanta_pp']['sd']:.2f} tok/s\n- llama.cpp pp: {s['llama_pp']['mean']:.2f} ± {s['llama_pp']['sd']:.2f} tok/s\n- MemVanta tg: {s['memvanta_tg']['mean']:.2f} ± {s['memvanta_tg']['sd']:.2f} tok/s\n- llama.cpp tg: {s['llama_tg']['mean']:.2f} ± {s['llama_tg']['sd']:.2f} tok/s\n- MemVanta peak RSS: {s['memvanta_peak_rss_kib']} KiB\n- llama.cpp peak RSS: {s['llama_peak_rss_kib']} KiB\n- MemVanta RSS reduction: {s['memvanta_rss_reduction_pct']:.2f}%\n")
+          print((o/'SUMMARY.md').read_text())
+          PY
+
+      - name: Preserve supporting evidence
+        run: |
+          cp model.sha256 model-size.txt tokenizer-smoke.txt generation-smoke.txt generation-smoke.stderr.txt oneb-model-ab/
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memvanta-oneb-model-ab
+          path: oneb-model-ab/**
+          if-no-files-found: warn
+          retention-days: 30
