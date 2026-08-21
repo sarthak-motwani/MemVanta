@@ -21,9 +21,14 @@ namespace {
 #pragma pack(push,1)
 struct GgufBlockQ4_0 { std::uint16_t d; std::uint8_t qs[16]; };
 struct GgufBlockQ8_0 { std::uint16_t d; std::int8_t qs[32]; };
+// GGML Q6_K: 256 weights per super-block. Layout matches upstream ggml:
+// 128 low-nibble bytes, 64 high-2-bit bytes, 16 signed sub-block scales,
+// then one fp16 super-block scale.
+struct GgufBlockQ6_K { std::uint8_t ql[128]; std::uint8_t qh[64]; std::int8_t scales[16]; std::uint16_t d; };
 #pragma pack(pop)
 static_assert(sizeof(GgufBlockQ4_0)==18);
 static_assert(sizeof(GgufBlockQ8_0)==34);
+static_assert(sizeof(GgufBlockQ6_K)==210);
 
 using Clock = std::chrono::steady_clock;
 std::atomic<bool> g_profile_enabled{false};
@@ -114,6 +119,32 @@ inline float dot_q8_0_fp32(const GgufBlockQ8_0* blocks,const float*x,std::size_t
     }return sum;
 }
 
+inline int q6_k_value(const GgufBlockQ6_K& b,std::size_t i){
+    // This scalar mapping is the direct equivalent of gguf-py's Q6_K
+    // dequantization reshape/bit-unpack sequence.
+    const std::size_t row32=i/32;
+    const std::size_t j=i%32;
+    const std::size_t group=row32/4;
+    const std::size_t local=row32%4;
+    const std::size_t ql_index=group*64+(local%2)*32+j;
+    const unsigned ql_shift=local<2?0u:4u;
+    const std::size_t qh_index=group*32+j;
+    const unsigned qh_shift=static_cast<unsigned>(local*2);
+    const int lo=(b.ql[ql_index]>>ql_shift)&0x0f;
+    const int hi=(b.qh[qh_index]>>qh_shift)&0x03;
+    return (lo|(hi<<4))-32;
+}
+
+inline float dot_q6_k_fp32(const GgufBlockQ6_K* blocks,const float*x,std::size_t n){
+    if(n%256)throw std::runtime_error("Q6_K row requires 256-element alignment");
+    const std::size_t nb=n/256;double sum=0.0;
+    for(std::size_t bi=0;bi<nb;++bi){
+        const auto& b=blocks[bi];const float d=fp16_to_fp32(b.d);const float* xv=x+bi*256;
+        for(std::size_t i=0;i<256;++i){const float w=d*float(b.scales[i/16])*float(q6_k_value(b,i));sum+=double(w)*xv[i];}
+    }
+    return static_cast<float>(sum);
+}
+
 inline int dot_i8_16(const std::int8_t* a,const std::int8_t* b){
 #if defined(__AVX2__)
     __m128i aa=_mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
@@ -192,7 +223,7 @@ const char* kernel_profile_kind_name(KernelProfileKind k){switch(k){case KernelP
 
 void tensor_vector_to_f32(const GgufFile&file,const GgufTensor&t,float*out,std::size_t n){if(t.elements()!=n)throw std::runtime_error("tensor vector size mismatch: "+t.name);const std::byte*p=file.tensor_data(t);if(t.type==GgmlType::F32){std::memcpy(out,p,n*sizeof(float));return;}if(t.type==GgmlType::F16){auto*q=reinterpret_cast<const std::uint16_t*>(p);for(std::size_t i=0;i<n;++i)out[i]=fp16_to_fp32(q[i]);return;}throw std::runtime_error("unsupported vector tensor type "+ggml_type_name(t.type)+": "+t.name);}
 
-void tensor_read_row_f32(const GgufFile&file,const GgufTensor&t,std::size_t row,float*out,std::size_t cols){if(t.dims.size()<2||t.ne(0)!=cols||row>=t.ne(1))throw std::runtime_error("tensor row shape mismatch: "+t.name);const std::byte*p=file.tensor_data(t);if(t.type==GgmlType::F32){std::memcpy(out,reinterpret_cast<const float*>(p)+row*cols,cols*sizeof(float));return;}if(t.type==GgmlType::F16){auto*q=reinterpret_cast<const std::uint16_t*>(p)+row*cols;for(std::size_t i=0;i<cols;++i)out[i]=fp16_to_fp32(q[i]);return;}if(t.type==GgmlType::Q4_0){auto*b=reinterpret_cast<const GgufBlockQ4_0*>(p)+row*(cols/32);for(std::size_t bi=0;bi<cols/32;++bi){float d=fp16_to_fp32(b[bi].d);for(std::size_t i=0;i<16;++i){out[bi*32+i]=d*(int(b[bi].qs[i]&15)-8);out[bi*32+16+i]=d*(int(b[bi].qs[i]>>4)-8);}}return;}if(t.type==GgmlType::Q8_0){auto*b=reinterpret_cast<const GgufBlockQ8_0*>(p)+row*(cols/32);for(std::size_t bi=0;bi<cols/32;++bi){float d=fp16_to_fp32(b[bi].d);for(std::size_t i=0;i<32;++i)out[bi*32+i]=d*b[bi].qs[i];}return;}throw std::runtime_error("unsupported embedding row type "+ggml_type_name(t.type)+": "+t.name);}
+void tensor_read_row_f32(const GgufFile&file,const GgufTensor&t,std::size_t row,float*out,std::size_t cols){if(t.dims.size()<2||t.ne(0)!=cols||row>=t.ne(1))throw std::runtime_error("tensor row shape mismatch: "+t.name);const std::byte*p=file.tensor_data(t);if(t.type==GgmlType::F32){std::memcpy(out,reinterpret_cast<const float*>(p)+row*cols,cols*sizeof(float));return;}if(t.type==GgmlType::F16){auto*q=reinterpret_cast<const std::uint16_t*>(p)+row*cols;for(std::size_t i=0;i<cols;++i)out[i]=fp16_to_fp32(q[i]);return;}if(t.type==GgmlType::Q4_0){auto*b=reinterpret_cast<const GgufBlockQ4_0*>(p)+row*(cols/32);for(std::size_t bi=0;bi<cols/32;++bi){float d=fp16_to_fp32(b[bi].d);for(std::size_t i=0;i<16;++i){out[bi*32+i]=d*(int(b[bi].qs[i]&15)-8);out[bi*32+16+i]=d*(int(b[bi].qs[i]>>4)-8);}}return;}if(t.type==GgmlType::Q8_0){auto*b=reinterpret_cast<const GgufBlockQ8_0*>(p)+row*(cols/32);for(std::size_t bi=0;bi<cols/32;++bi){float d=fp16_to_fp32(b[bi].d);for(std::size_t i=0;i<32;++i)out[bi*32+i]=d*b[bi].qs[i];}return;}if(t.type==GgmlType::Q6_K){if(cols%256)throw std::runtime_error("Q6_K embedding row not block aligned: "+t.name);auto*b=reinterpret_cast<const GgufBlockQ6_K*>(p)+row*(cols/256);for(std::size_t bi=0;bi<cols/256;++bi){float d=fp16_to_fp32(b[bi].d);for(std::size_t i=0;i<256;++i)out[bi*256+i]=d*float(b[bi].scales[i/16])*float(q6_k_value(b[bi],i));}return;}throw std::runtime_error("unsupported embedding row type "+ggml_type_name(t.type)+": "+t.name);}
 
 float dot_f32_simd(const float*a,const float*b,std::size_t n){
 #if defined(__AVX2__)
@@ -214,6 +245,7 @@ void tensor_matvec(const GgufFile&file,const GgufTensor&t,const float*x,float*y,
     const auto t0=Clock::now();if(t.dims.size()<2)throw std::runtime_error("matvec requires rank-2 tensor: "+t.name);const std::size_t cols=t.ne(0),rows=t.ne(1);const std::byte*p=file.tensor_data(t);
     if(t.type==GgmlType::Q4_0){if(cols%32)throw std::runtime_error("Q4_0 matrix row not block aligned: "+t.name);auto a=quantize_q8(x,cols);auto*A=reinterpret_cast<const GgufBlockQ4_0*>(p);auto nb=cols/32;parallel_rows(rows,threads,pool,[&](std::size_t r0,std::size_t r1){for(std::size_t r=r0;r<r1;++r)y[r]=dot_q4_q8(A+r*nb,a.q.data(),a.d.data(),nb);});}
     else if(t.type==GgmlType::Q8_0){auto*A=reinterpret_cast<const GgufBlockQ8_0*>(p);auto nb=cols/32;parallel_rows(rows,threads,pool,[&](std::size_t r0,std::size_t r1){for(std::size_t r=r0;r<r1;++r)y[r]=dot_q8_0_fp32(A+r*nb,x,cols);});}
+    else if(t.type==GgmlType::Q6_K){if(cols%256)throw std::runtime_error("Q6_K matrix row not block aligned: "+t.name);auto*A=reinterpret_cast<const GgufBlockQ6_K*>(p);auto nb=cols/256;parallel_rows(rows,threads,pool,[&](std::size_t r0,std::size_t r1){for(std::size_t r=r0;r<r1;++r)y[r]=dot_q6_k_fp32(A+r*nb,x,cols);});}
     else if(t.type==GgmlType::F32){auto*A=reinterpret_cast<const float*>(p);parallel_rows(rows,threads,pool,[&](std::size_t a,std::size_t b){for(std::size_t r=a;r<b;++r)y[r]=dot_f32_simd(A+r*cols,x,cols);});}
     else if(t.type==GgmlType::F16){auto*A=reinterpret_cast<const std::uint16_t*>(p);parallel_rows(rows,threads,pool,[&](std::size_t a,std::size_t b){for(std::size_t r=a;r<b;++r){double s=0;for(std::size_t c=0;c<cols;++c)s+=double(fp16_to_fp32(A[r*cols+c]))*x[c];y[r]=float(s);}});}
     else throw std::runtime_error("unsupported matvec tensor type "+ggml_type_name(t.type)+": "+t.name);
@@ -222,7 +254,7 @@ void tensor_matvec(const GgufFile&file,const GgufTensor&t,const float*x,float*y,
 
 void tensor_matmul_batch(const GgufFile&file,const GgufTensor&t,const float*x,float*y,std::size_t batch,unsigned threads,WorkerPool*pool){
     const auto t0=Clock::now();if(t.dims.size()<2)throw std::runtime_error("matmul batch requires rank-2 tensor: "+t.name);const std::size_t cols=t.ne(0),rows=t.ne(1);const std::byte*p=file.tensor_data(t);const std::size_t jobs=batch*rows;
-    parallel_rows(jobs,threads,pool,[&](std::size_t a,std::size_t b){for(std::size_t j=a;j<b;++j){std::size_t bi=j/rows,r=j%rows;const float*xv=x+bi*cols;float v=0;if(t.type==GgmlType::Q4_0)v=dot_q4_0_fp32(reinterpret_cast<const GgufBlockQ4_0*>(p)+r*(cols/32),xv,cols);else if(t.type==GgmlType::Q8_0)v=dot_q8_0_fp32(reinterpret_cast<const GgufBlockQ8_0*>(p)+r*(cols/32),xv,cols);else if(t.type==GgmlType::F32)v=dot_f32_simd(reinterpret_cast<const float*>(p)+r*cols,xv,cols);else if(t.type==GgmlType::F16){auto*A=reinterpret_cast<const std::uint16_t*>(p)+r*cols;double s=0;for(std::size_t c=0;c<cols;++c)s+=double(fp16_to_fp32(A[c]))*xv[c];v=float(s);}else throw std::runtime_error("unsupported batch matmul tensor type "+ggml_type_name(t.type)+": "+t.name);y[bi*rows+r]=v;}});
+    parallel_rows(jobs,threads,pool,[&](std::size_t a,std::size_t b){for(std::size_t j=a;j<b;++j){std::size_t bi=j/rows,r=j%rows;const float*xv=x+bi*cols;float v=0;if(t.type==GgmlType::Q4_0)v=dot_q4_0_fp32(reinterpret_cast<const GgufBlockQ4_0*>(p)+r*(cols/32),xv,cols);else if(t.type==GgmlType::Q8_0)v=dot_q8_0_fp32(reinterpret_cast<const GgufBlockQ8_0*>(p)+r*(cols/32),xv,cols);else if(t.type==GgmlType::Q6_K){if(cols%256)throw std::runtime_error("Q6_K batch matrix row not block aligned: "+t.name);v=dot_q6_k_fp32(reinterpret_cast<const GgufBlockQ6_K*>(p)+r*(cols/256),xv,cols);}else if(t.type==GgmlType::F32)v=dot_f32_simd(reinterpret_cast<const float*>(p)+r*cols,xv,cols);else if(t.type==GgmlType::F16){auto*A=reinterpret_cast<const std::uint16_t*>(p)+r*cols;double s=0;for(std::size_t c=0;c<cols;++c)s+=double(fp16_to_fp32(A[c]))*xv[c];v=float(s);}else throw std::runtime_error("unsupported batch matmul tensor type "+ggml_type_name(t.type)+": "+t.name);y[bi*rows+r]=v;}});
     profile_add(t,batch,std::chrono::duration<double,std::milli>(Clock::now()-t0).count());
 }
 
