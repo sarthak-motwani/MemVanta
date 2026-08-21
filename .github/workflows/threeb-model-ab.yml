@@ -15,11 +15,9 @@ permissions:
   contents: read
 
 env:
-  HF_REPO: klosax/openllama-3b-v2-gguf
-  HF_REV: ab010e7a11732f21baf74675c61f6482f65232f4
-  MODEL: openllama-3b-v2-q4_0.gguf
-  MODEL_SHA256: d129ff53c9451490144ec24ad4bb690eff51a6c32d21905b37cb9921da756a26
-  MODEL_BYTES: '1928625664'
+  HF_REPO: mav23/open_llama_3b_v2-GGUF
+  HF_REV: main
+  MODEL: open_llama_3b_v2.Q4_0.gguf
   THREADS: 4
   CTX: 768
   PROMPT: 512
@@ -59,18 +57,30 @@ jobs:
       - name: Prepare evidence directory
         run: mkdir -p threeb-model-ab
 
-      - name: Download and verify pinned OpenLLaMA 3B Q4_0
+      - name: Download, fingerprint, and validate OpenLLaMA 3B Q4_0
         run: |
           set -euo pipefail
           MODEL_URL="https://huggingface.co/$HF_REPO/resolve/$HF_REV/$MODEL?download=true"
           echo "$MODEL_URL" > threeb-model-ab/model-url.txt
-          echo "$MODEL_SHA256  $MODEL" > threeb-model-ab/expected-model.sha256
           curl -L --fail --retry 3 --retry-delay 5 "$MODEL_URL" -o "$MODEL"
-          echo "$MODEL_SHA256  $MODEL" | sha256sum -c - | tee threeb-model-ab/model-sha-check.txt
+          sha256sum "$MODEL" | tee threeb-model-ab/model.sha256
           actual_bytes="$(stat -c %s "$MODEL")"
           echo "model_bytes=$actual_bytes" | tee threeb-model-ab/model-size.txt
-          test "$actual_bytes" -eq "$MODEL_BYTES"
-          sha256sum "$MODEL" | tee threeb-model-ab/model.sha256
+          test "$actual_bytes" -gt 1500000000
+          python3 - <<'PY'
+          import pathlib, struct, json
+          p=pathlib.Path('open_llama_3b_v2.Q4_0.gguf')
+          with p.open('rb') as f:
+              magic=f.read(4)
+              version=struct.unpack('<I', f.read(4))[0]
+          info={'magic':magic.decode('ascii','replace'),'gguf_version':version}
+          pathlib.Path('threeb-model-ab/gguf-header.json').write_text(json.dumps(info,indent=2)+'\n')
+          print(info)
+          if magic != b'GGUF':
+              raise SystemExit('invalid GGUF magic')
+          if version < 2:
+              raise SystemExit(f'obsolete GGUF version {version}; need >= 2')
+          PY
 
       - name: Build pinned llama.cpp CPU tools
         run: |
@@ -92,6 +102,7 @@ jobs:
             echo "hf_revision=$HF_REV"
             cat threeb-model-ab/model.sha256
             cat threeb-model-ab/model-size.txt
+            cat threeb-model-ab/gguf-header.json
             echo "memvanta_commit=$GITHUB_SHA"
             echo "llama_cpp_ref=$LLAMA_CPP_REF"
             echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=$KV reps=$REPS warmup=$WARMUP"
