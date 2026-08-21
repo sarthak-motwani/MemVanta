@@ -66,23 +66,31 @@ jobs:
           echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
           stat -c 'model_bytes=%s' "$MODEL" | tee benchmark-evidence/model.txt
 
-      - name: Profile TinyStories 1-thread
+      - name: Profile TinyStories repeated 1-thread
         run: |
-          /usr/bin/time -v ./build/memvanta_profile \
-            --model "$MODEL" --threads 1 --ctx 128 --prompt 32 --gen 8 --batch 16 \
-            --csv benchmark-evidence/layer-profile-t1.csv \
-            > benchmark-evidence/profile-t1.txt \
-            2> benchmark-evidence/profile-t1.time.txt
-          cat benchmark-evidence/profile-t1.txt
+          : > benchmark-evidence/profile-summary-t1.txt
+          for i in 1 2 3; do
+            /usr/bin/time -v ./build/memvanta_profile \
+              --model "$MODEL" --threads 1 --ctx 128 --prompt 32 --gen 8 --batch 16 \
+              --csv "benchmark-evidence/layer-profile-t1-r${i}.csv" \
+              > "benchmark-evidence/profile-t1-r${i}.txt" \
+              2> "benchmark-evidence/profile-t1-r${i}.time.txt"
+            grep -E '^(prefill_ms|prefill_cycles_per_token|qkv_projection_ms)' "benchmark-evidence/profile-t1-r${i}.txt" \
+              | sed "s/^/run=${i} /" | tee -a benchmark-evidence/profile-summary-t1.txt
+          done
 
-      - name: Profile TinyStories 4-thread
+      - name: Profile TinyStories repeated 4-thread
         run: |
-          /usr/bin/time -v ./build/memvanta_profile \
-            --model "$MODEL" --threads 4 --ctx 128 --prompt 32 --gen 8 --batch 16 \
-            --csv benchmark-evidence/layer-profile-t4.csv \
-            > benchmark-evidence/profile-t4.txt \
-            2> benchmark-evidence/profile-t4.time.txt
-          cat benchmark-evidence/profile-t4.txt
+          : > benchmark-evidence/profile-summary-t4.txt
+          for i in 1 2 3; do
+            /usr/bin/time -v ./build/memvanta_profile \
+              --model "$MODEL" --threads 4 --ctx 128 --prompt 32 --gen 8 --batch 16 \
+              --csv "benchmark-evidence/layer-profile-t4-r${i}.csv" \
+              > "benchmark-evidence/profile-t4-r${i}.txt" \
+              2> "benchmark-evidence/profile-t4-r${i}.time.txt"
+            grep -E '^(prefill_ms|prefill_cycles_per_token|qkv_projection_ms)' "benchmark-evidence/profile-t4-r${i}.txt" \
+              | sed "s/^/run=${i} /" | tee -a benchmark-evidence/profile-summary-t4.txt
+          done
 
       - name: Greedy generation correctness smoke
         run: |
