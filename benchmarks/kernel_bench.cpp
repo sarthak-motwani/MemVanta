@@ -47,5 +47,26 @@ int main(int argc,char**argv){
     run("q4_0_q8_0_gemv", q4.size()*sizeof(memvanta::BlockQ4_0), q4q8_threads, 1, [&]{memvanta::matvec_q4_q8(q4.data(),xq8.data(),y.data(),rows,cols,threads);});
     const unsigned batch_threads=memvanta::effective_kernel_threads(rows,cols*std::max<std::size_t>(batch,1),threads);
     run("q4_0_fp32_batched_gemm", q4.size()*sizeof(memvanta::BlockQ4_0), batch_threads, batch, [&]{memvanta::matmul_q4_0_batch(q4.data(),xb.data(),y.data(),rows,cols,batch,threads);});
+
+    // TinyStories output.weight is Q8_0 with cols=288 and rows=32000.
+    // Keep the optimized candidate experimental until it beats the baseline here
+    // and matches its output numerically; it is not wired into production inference.
+    constexpr std::size_t out_rows=32000, out_cols=288;
+    std::vector<float> OA(out_rows*out_cols), ox(out_cols), oy_ref(out_rows), oy_fast(out_rows);
+    for(auto&v:OA)v=dist(rng); for(auto&v:ox)v=dist(rng);
+    auto oq8=memvanta::quantize_q8_0(OA.data(),OA.size());
+    memvanta::matvec_q8_0(oq8.data(),ox.data(),oy_ref.data(),out_rows,out_cols,threads);
+    memvanta::matvec_q8_0_fast(oq8.data(),ox.data(),oy_fast.data(),out_rows,out_cols,threads);
+    float max_abs=0.0f; for(std::size_t i=0;i<out_rows;++i) max_abs=std::max(max_abs,std::abs(oy_ref[i]-oy_fast[i]));
+    std::cerr<<"q8_output_head_max_abs_diff="<<std::setprecision(9)<<max_abs<<"\n";
+    if(max_abs>1e-4f){std::cerr<<"q8 output-head fast path correctness failure\n";return 3;}
+    auto run_output=[&](const char*name,auto fn){
+      fn(); std::vector<double> ts; ts.reserve(reps);
+      for(unsigned r=0;r<reps;++r){auto t0=Clock::now();fn();auto t1=Clock::now();sink+=oy_fast[r%out_rows];ts.push_back(std::chrono::duration<double>(t1-t0).count());}
+      auto st=stats(ts);const double ops=2.0*out_rows*out_cols;const double gflops=ops/st.mean/1e9;const double bytes=double(oq8.size()*sizeof(memvanta::BlockQ8_0));const double gib=bytes/st.mean/(1024.0*1024.0*1024.0);
+      std::cout<<name<<","<<out_rows<<","<<out_cols<<",1,"<<threads<<","<<std::fixed<<std::setprecision(6)<<st.mean<<","<<st.sd<<","<<std::setprecision(3)<<gflops<<","<<gib<<"\n";
+    };
+    run_output("q8_0_output_head_baseline",[&]{memvanta::matvec_q8_0(oq8.data(),ox.data(),oy_ref.data(),out_rows,out_cols,threads);});
+    run_output("q8_0_output_head_fast",[&]{memvanta::matvec_q8_0_fast(oq8.data(),ox.data(),oy_fast.data(),out_rows,out_cols,threads);});
     if(sink==1234567.0f) std::cerr<<sink;
 }
