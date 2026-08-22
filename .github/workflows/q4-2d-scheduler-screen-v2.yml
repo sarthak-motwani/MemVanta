@@ -1,5 +1,6 @@
 name: Q4 2D Scheduler Screen v2
 
+# Retrigger marker: 2026-08-22
 on:
   workflow_dispatch:
   push:
