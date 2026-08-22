@@ -1,0 +1,34 @@
+{
+  "winner": null,
+  "rows": {
+    "baseline": {
+      "prefill_ms": 26.7559,
+      "decode_ms": 20.12677777777778,
+      "rss_kib": 26995.555555555555,
+      "prefill_cv": 3.753935257941093,
+      "decode_cv": 0.3102544846635066,
+      "prefill_tps": 2391.9957841074306,
+      "decode_tps": 794.9608316173588
+    },
+    "rows2_all": {
+      "prefill_ms": 24.684822222222223,
+      "decode_ms": 20.055477777777778,
+      "rss_kib": 26956.88888888889,
+      "prefill_cv": 1.5916809394415055,
+      "decode_cv": 0.5312927226022521,
+      "prefill_tps": 2592.6862840593903,
+      "decode_tps": 797.7870274289153,
+      "prefill_gain": 8.390085855726003,
+      "decode_delta": 0.355513844098021,
+      "combined_gain": 2.2460691539130107,
+      "rss_delta": -0.14323345406650478
+    }
+  },
+  "gate": {
+    "combined_gain_min": 5,
+    "prefill_gain_min": 8,
+    "decode_delta_min": -1,
+    "rss_delta_max": 2,
+    "cv_max": 3
+  }
+}
