@@ -1,0 +1,201 @@
+name: Throughput Factorial Screen
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/throughput-factorial-screen.yml'
+
+permissions:
+  contents: read
+
+env:
+  MODEL: stories15M-q4_0.gguf
+  MODEL_URL: https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true
+  MODEL_SHA256: 66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739
+  CTX: 128
+  PROMPT: 64
+  GEN: 16
+  REPS: 3
+  SCREEN_SCHEMA: 1
+
+jobs:
+  factorial-screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout stable MemVanta
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl time
+
+      - name: Build and test stable source
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target memvanta_profile memvanta_tests memvanta_tokenizer_tests -j "$(nproc)"
+          ctest --test-dir build --output-on-failure
+
+      - name: Download exact small trained model
+        run: |
+          curl -L --fail --retry 3 --retry-delay 2 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+          stat -c 'model_bytes=%s' "$MODEL"
+
+      - name: Run full factorial screen
+        run: |
+          set -euo pipefail
+          mkdir -p throughput-factorial-screen/raw
+          python3 - <<'PY'
+          import itertools, json, os, pathlib, random, re, statistics, subprocess, time
+
+          root=pathlib.Path('throughput-factorial-screen')
+          raw=root/'raw'
+          model=os.environ['MODEL']
+          ctx=int(os.environ['CTX'])
+          prompt=int(os.environ['PROMPT'])
+          gen=int(os.environ['GEN'])
+          reps=int(os.environ['REPS'])
+
+          # Conference-inspired search dimensions:
+          # - batch/chunk size: Sarathi-Serve / NanoFlow scheduling principle
+          # - thread count + placement: CPU parallelism / resource utilization
+          # - FP32 vs Q8 activation path: low-bit mixed-precision kernel organization
+          threads=[2,4]
+          batches=[8,16,32,64]
+          q8acts=[0,1]
+          binds=['close','spread']
+          configs=list(itertools.product(threads,batches,q8acts,binds))
+          random.Random(20260822).shuffle(configs)
+
+          keys=['prefill_ms','decode_total_ms','ffn_gemm_ms','qkv_projection_ms','non_gemm_core_ms']
+          def parse(text):
+              out={}
+              for k in keys:
+                  m=re.search(rf'\b{k}=([0-9.]+)', text)
+                  out[k]=float(m.group(1)) if m else None
+              return out
+
+          def run_one(tag,t,b,q8,bind,rep):
+              env=os.environ.copy()
+              env['OMP_NUM_THREADS']=str(t)
+              env['OMP_DYNAMIC']='FALSE'
+              env['OMP_PROC_BIND']=bind
+              env['OMP_PLACES']='cores'
+              env['MALLOC_ARENA_MAX']='2'
+              if q8:
+                  env['MEMVANTA_FORCE_Q8_ACT']='1'
+              else:
+                  env.pop('MEMVANTA_FORCE_Q8_ACT',None)
+              cmd=['./build/memvanta_profile','--model',model,'--threads',str(t),'--ctx',str(ctx),
+                   '--prompt',str(prompt),'--gen',str(gen),'--batch',str(b),
+                   '--csv',str(raw/f'{tag}-r{rep}.csv')]
+              p=subprocess.run(cmd,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,check=False,timeout=120)
+              (raw/f'{tag}-r{rep}.txt').write_text(p.stdout)
+              if p.returncode!=0:
+                  raise RuntimeError(f'{tag} rep {rep} failed rc={p.returncode}\n{p.stdout[-2000:]}')
+              vals=parse(p.stdout)
+              if vals['prefill_ms'] is None or vals['decode_total_ms'] is None:
+                  raise RuntimeError(f'{tag} rep {rep}: metrics missing')
+              return vals
+
+          # Fixed reference repeated at the beginning and end to quantify runner drift.
+          control=(4,32,0,'close')
+          control_runs=[]
+          for phase in ('start','end'):
+              if phase=='end':
+                  pass
+              else:
+                  for r in range(1,reps+1):
+                      control_runs.append(run_one('control-start',*control,r))
+
+          rows=[]
+          for idx,(t,b,q8,bind) in enumerate(configs,1):
+              tag=f'c{idx:02d}-t{t}-b{b}-q8{q8}-{bind}'
+              vals=[run_one(tag,t,b,q8,bind,r) for r in range(1,reps+1)]
+              def stat(k):
+                  xs=[v[k] for v in vals]
+                  return statistics.mean(xs), statistics.stdev(xs) if len(xs)>1 else 0.0
+              pm,ps=stat('prefill_ms'); dm,ds=stat('decode_total_ms'); fm,fs=stat('ffn_gemm_ms')
+              # Combined throughput score: harmonic-like balance of normalized work rates.
+              prefill_tps=prompt*1000.0/pm
+              decode_tps=gen*1000.0/dm
+              score=2.0/(1.0/prefill_tps+1.0/decode_tps)
+              rows.append({'tag':tag,'threads':t,'batch':b,'q8act':q8,'bind':bind,
+                           'prefill_ms_mean':pm,'prefill_ms_sd':ps,'decode_ms_mean':dm,'decode_ms_sd':ds,
+                           'ffn_ms_mean':fm,'ffn_ms_sd':fs,'prefill_tps':prefill_tps,'decode_tps':decode_tps,
+                           'score':score,'prefill_cv_pct':100*ps/pm,'decode_cv_pct':100*ds/dm})
+
+          for r in range(1,reps+1):
+              control_runs.append(run_one('control-end',*control,r))
+          cstart=control_runs[:reps]; cend=control_runs[reps:]
+          def mean(xs,k): return statistics.mean(v[k] for v in xs)
+          drift={'prefill_pct':(mean(cend,'prefill_ms')-mean(cstart,'prefill_ms'))*100/mean(cstart,'prefill_ms'),
+                 'decode_pct':(mean(cend,'decode_total_ms')-mean(cstart,'decode_total_ms'))*100/mean(cstart,'decode_total_ms')}
+
+          # Compare each candidate with the matching stable-FP32/close configuration at same threads+batch.
+          refs={(r['threads'],r['batch']):r for r in rows if r['q8act']==0 and r['bind']=='close'}
+          for r in rows:
+              ref=refs[(r['threads'],r['batch'])]
+              r['score_improvement_pct']=(r['score']/ref['score']-1.0)*100.0
+              r['prefill_improvement_pct']=(ref['prefill_ms_mean']-r['prefill_ms_mean'])*100/ref['prefill_ms_mean']
+              r['decode_improvement_pct']=(ref['decode_ms_mean']-r['decode_ms_mean'])*100/ref['decode_ms_mean']
+              r['screen_pass']=(r['score_improvement_pct']>=5.0 and r['prefill_cv_pct']<=5.0 and r['decode_cv_pct']<=5.0 and r['decode_improvement_pct']>=-2.0)
+
+          rows.sort(key=lambda r:r['score'],reverse=True)
+          passing=[r for r in rows if r['screen_pass']]
+          result={'schema':int(os.environ['SCREEN_SCHEMA']),'model_sha256':os.environ['MODEL_SHA256'],
+                  'source_commit':os.environ.get('GITHUB_SHA'),'reps':reps,'control_drift_pct':drift,
+                  'dimensions':{'threads':threads,'batches':batches,'q8act':q8acts,'bind':binds},
+                  'winner':passing[0] if passing else None,'passing_count':len(passing),'rows':rows}
+          (root/'summary.json').write_text(json.dumps(result,indent=2)+'\n')
+
+          lines=['# Throughput factorial screen','',
+                 'TinyStories 15M Q4_0; stable MemVanta source; 3 reps/config; 32 configurations.','',
+                 f"Control drift: prefill {drift['prefill_pct']:.2f}%, decode {drift['decode_pct']:.2f}%",'',
+                 '| Rank | Threads | Batch | Q8 act | Bind | Prefill tok/s | Decode tok/s | Score | vs matching control | Pass |',
+                 '|---:|---:|---:|---:|---|---:|---:|---:|---:|:---:|']
+          for i,r in enumerate(rows[:12],1):
+              lines.append(f"| {i} | {r['threads']} | {r['batch']} | {r['q8act']} | {r['bind']} | {r['prefill_tps']:.2f} | {r['decode_tps']:.2f} | {r['score']:.2f} | {r['score_improvement_pct']:.2f}% | {'YES' if r['screen_pass'] else 'no'} |")
+          lines += ['', f'Passing configurations: **{len(passing)}**.',
+                    'Promotion rule: >=5% combined score improvement vs matching stable control, <=5% CV in prefill/decode, and no more than 2% decode regression.']
+          if passing:
+              w=passing[0]
+              lines += ['',f"Screen winner: threads={w['threads']}, batch={w['batch']}, q8act={w['q8act']}, bind={w['bind']}; score improvement={w['score_improvement_pct']:.2f}%.",
+                        'This is only a small-model screen; it must pass a larger-model same-runner validation before any production change.']
+          else:
+              lines += ['','No configuration met the promotion gate. Keep the current production configuration unchanged.']
+          (root/'SUMMARY.md').write_text('\n'.join(lines)+'\n')
+          print((root/'SUMMARY.md').read_text())
+          PY
+
+      - name: Verify production source remained untouched
+        run: |
+          git diff --exit-code -- src include benchmarks tests CMakeLists.txt
+
+      - name: Record environment
+        run: |
+          {
+            echo "source_commit=$GITHUB_SHA"
+            echo "screen_schema=$SCREEN_SCHEMA"
+            echo "model_sha256=$MODEL_SHA256"
+            echo "prompt=$PROMPT gen=$GEN ctx=$CTX reps=$REPS"
+            uname -a
+            lscpu
+            free -h
+          } > throughput-factorial-screen/environment.txt
+
+      - name: Upload screening evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memvanta-throughput-factorial-screen
+          path: throughput-factorial-screen/**
+          if-no-files-found: error
+          retention-days: 30
