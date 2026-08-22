@@ -1,0 +1,44 @@
+{
+  "winner": null,
+  "rows": {
+    "baseline": {
+      "prefill_ms": 34.25398,
+      "decode_ms": 25.15438,
+      "rss_kib": 26756.0,
+      "prefill_cv": 6.347542674478194,
+      "decode_cv": 0.3226117389577764,
+      "prefill_tps": 1868.3960228855158,
+      "decode_tps": 636.0721273988864,
+      "gain": 0.0,
+      "rss_delta": 0.0,
+      "decode_delta": 0.0,
+      "pass": false
+    },
+    "rows2_ffn": {
+      "prefill_ms": 32.663399999999996,
+      "decode_ms": 25.379479999999997,
+      "rss_kib": 26778.4,
+      "prefill_cv": 3.107408026082163,
+      "decode_cv": 1.2911206591802793,
+      "prefill_tps": 1959.379611430531,
+      "decode_tps": 630.4305683173966,
+      "gain": 0.514363698315079,
+      "rss_delta": 0.08371953954253719,
+      "decode_delta": -0.8869370058015358,
+      "pass": false
+    },
+    "rows2_all": {
+      "prefill_ms": 30.97804,
+      "decode_ms": 25.38428,
+      "rss_kib": 26801.6,
+      "prefill_cv": 1.504251380188899,
+      "decode_cv": 0.789519888434808,
+      "prefill_tps": 2065.9796423530993,
+      "decode_tps": 630.3113580530943,
+      "gain": 1.7781663622486565,
+      "rss_delta": 0.1704290626401539,
+      "decode_delta": -0.9056786326025468,
+      "pass": false
+    }
+  }
+}
