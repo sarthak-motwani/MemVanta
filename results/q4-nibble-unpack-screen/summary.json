@@ -1,0 +1,49 @@
+{
+  "source_commit": "b81cd7097c2569c3c80eb9672e47542f7d1d1efa",
+  "model_sha256": "66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739",
+  "winner": "lut",
+  "rows": {
+    "baseline": {
+      "prefill_ms": 35.027542857142855,
+      "decode_ms": 27.992371428571428,
+      "rss_kib": 26773.14285714286,
+      "prefill_cv_pct": 2.791906984562409,
+      "decode_cv_pct": 27.355098943386466,
+      "rss_cv_pct": 0.3139504562437134,
+      "prefill_tps": 1827.133586304329,
+      "decode_tps": 571.5842989875813,
+      "score": 870.7659008073243,
+      "speed_gain_pct": 0.0,
+      "rss_delta_pct": 0.0,
+      "pass": false
+    },
+    "lut": {
+      "prefill_ms": 34.14454285714286,
+      "decode_ms": 24.914471428571428,
+      "rss_kib": 26864.0,
+      "prefill_cv_pct": 2.560708986568216,
+      "decode_cv_pct": 0.7909373719998416,
+      "rss_cv_pct": 0.4228987175727773,
+      "prefill_tps": 1874.3844446173787,
+      "decode_tps": 642.1970478431067,
+      "score": 956.6343553448207,
+      "speed_gain_pct": 9.86125598830685,
+      "rss_delta_pct": 0.3393592726186112,
+      "pass": true
+    },
+    "bias32": {
+      "prefill_ms": 34.54307142857143,
+      "decode_ms": 24.99917142857143,
+      "rss_kib": 26813.14285714286,
+      "prefill_cv_pct": 3.2112432426678983,
+      "decode_cv_pct": 4.555749560605436,
+      "rss_cv_pct": 0.40035966166398695,
+      "prefill_tps": 1852.7593914843374,
+      "decode_tps": 640.021212131602,
+      "score": 951.3916385629186,
+      "speed_gain_pct": 9.259174903477806,
+      "rss_delta_pct": 0.1494034533541022,
+      "pass": true
+    }
+  }
+}
