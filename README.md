@@ -96,13 +96,23 @@ Published runs preserve raw evidence instead of relying only on transient CI log
 - [`results/tinyllama-1.1b-ab/`](results/tinyllama-1.1b-ab/) — 1.1B repeated A/B
 - [`results/smollm2-360m-ab/`](results/smollm2-360m-ab/) — 360M repeated A/B
 
+### Validation protocol
+
+MemVanta treats memory efficiency as the primary optimization target and throughput as a secondary transparency metric.
+
+- [`docs/MEMORY_BENCHMARKING.md`](docs/MEMORY_BENCHMARKING.md) — benchmark methodology and claim boundaries
+- [`docs/BENCHMARK_CHECKLIST.md`](docs/BENCHMARK_CHECKLIST.md) — publication checklist for new results
+- [`docs/EXTERNAL_REPRODUCTION.md`](docs/EXTERNAL_REPRODUCTION.md) — guide for independent third-party reproduction
+
+Independent results that confirm, narrow, or contradict the published measurements are welcome.
+
 ## Project direction
 
 The goal is simple:
 
 > **Run larger quantized LLMs within smaller RAM budgets on commodity CPUs.**
 
-Current work is focused on **tightening the 7B minimum successful boundary, physical-CPU reproduction, numerical validation, and throughput optimization**.
+Current work is focused on **tightening the 7B/8B memory boundary, reproducing results on physical CPUs, broadening model-family coverage, and strengthening numerical and third-party validation**. Throughput remains reported so the trade-off is visible, but it is not the primary optimization target.
 
 MemVanta is an **engineering prototype under active development**. Published trained-model evidence now reaches 7B and consistently shows lower peak RSS on the tested workloads; it does not establish a universal scaling law or throughput advantage.
 
