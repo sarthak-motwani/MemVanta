@@ -14,6 +14,7 @@ on:
       - RAM Constrained 7B
       - Seven Billion Throughput Profile
       - Seven Billion FFN Tuning
+      - Seven Billion FFN Kernel A/B
     types: [completed]
 
 permissions:
@@ -31,7 +32,8 @@ jobs:
        github.event.workflow_run.name == 'Seven Billion Model A/B' ||
        github.event.workflow_run.name == 'RAM Constrained 7B' ||
        github.event.workflow_run.name == 'Seven Billion Throughput Profile' ||
-       github.event.workflow_run.name == 'Seven Billion FFN Tuning')
+       github.event.workflow_run.name == 'Seven Billion FFN Tuning' ||
+       github.event.workflow_run.name == 'Seven Billion FFN Kernel A/B')
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -121,6 +123,13 @@ jobs:
               DEST="results/openllama-7b-v2-ffn-tuning"
             else
               DEST="results/diagnostics/openllama-7b-v2-ffn-tuning-run-${RUN_ID}"
+            fi
+          elif [ "$WORKFLOW_NAME" = "Seven Billion FFN Kernel A/B" ]; then
+            SRC="downloaded-evidence/memvanta-sevenb-ffn-kernel-ab"
+            if [ "$CONCLUSION" = "success" ]; then
+              DEST="results/openllama-7b-v2-ffn-kernel-ab"
+            else
+              DEST="results/diagnostics/openllama-7b-v2-ffn-kernel-ab-run-${RUN_ID}"
             fi
           else
             echo "Unsupported workflow: $WORKFLOW_NAME" >&2
