@@ -1,4 +1,5 @@
 # Explicit retrigger after tested kernel commits created by GitHub Actions.
+# Revalidate restored baseline after reverting the regressed Q4 FFN batch8 fusion.
 name: Seven Billion Throughput Profile
 
 on:
