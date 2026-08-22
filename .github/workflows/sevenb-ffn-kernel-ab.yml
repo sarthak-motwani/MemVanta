@@ -1,0 +1,124 @@
+name: Seven Billion FFN Kernel A/B
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sevenb-ffn-kernel-ab.yml'
+
+env:
+  MODEL: openlm-research-open_llama_7b_v2-Q4_0.gguf
+  MODEL_URL: https://huggingface.co/maddes8cht/openlm-research-open_llama_7b_v2-gguf/resolve/main/openlm-research-open_llama_7b_v2-Q4_0.gguf?download=true
+  MODEL_SHA256: 892f6e2e840ed98bb7bc1d74da67ae0cca52b2d90b0316d0a7e66a37a5a60760
+  BASELINE_COMMIT: ce4413db7eba71cc4349acfe18daa7a62d51f36b
+  THREADS: 4
+  CTX: 256
+  PROMPT: 128
+  GEN: 16
+  BATCH: 32
+  OMP_NUM_THREADS: 4
+  OMP_DYNAMIC: 'FALSE'
+  OMP_PROC_BIND: close
+  OMP_PLACES: cores
+  MALLOC_ARENA_MAX: 2
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout optimized main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          path: optimized
+
+      - name: Checkout baseline commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASELINE_COMMIT }}
+          fetch-depth: 1
+          path: baseline
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl time ccache
+
+      - name: Build both variants
+        run: |
+          cmake -S baseline -B baseline/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build baseline/build --target memvanta_profile memvanta_tests memvanta_tokenizer_tests -j "$(nproc)"
+          ctest --test-dir baseline/build --output-on-failure
+          cmake -S optimized -B optimized/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build optimized/build --target memvanta_profile memvanta_tests memvanta_tokenizer_tests -j "$(nproc)"
+          ctest --test-dir optimized/build --output-on-failure
+
+      - name: Download exact 7B GGUF once
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 --retry-delay 3 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+
+      - name: Run same-runner A/B
+        run: |
+          set -euo pipefail
+          mkdir -p sevenb-ffn-kernel-ab
+          for variant in baseline optimized; do
+            ./$variant/build/memvanta_profile \
+              --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
+              --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" \
+              --csv "sevenb-ffn-kernel-ab/${variant}.csv" \
+              > "sevenb-ffn-kernel-ab/${variant}.txt"
+          done
+          python3 - <<'PY'
+          import pathlib,re,json
+          out=pathlib.Path('sevenb-ffn-kernel-ab')
+          def parse(name):
+              s=(out/f'{name}.txt').read_text()
+              def val(k):
+                  m=re.search(rf'\b{k}=([0-9.]+)',s)
+                  return float(m.group(1)) if m else None
+              return {k:val(k) for k in ['prefill_ms','decode_total_ms','ffn_gemm_ms','qkv_projection_ms','attention_output_projection_ms','output_head_ms','non_gemm_core_ms']}
+          b=parse('baseline'); o=parse('optimized')
+          def pct(old,new): return (old-new)*100.0/old if old else None
+          summary={
+              'baseline_commit':'ce4413db7eba71cc4349acfe18daa7a62d51f36b',
+              'optimized_commit':__import__('os').environ.get('GITHUB_SHA'),
+              'baseline':b,'optimized':o,
+              'improvement_pct':{k:pct(b[k],o[k]) for k in b if b[k] is not None and o[k] is not None}
+          }
+          (out/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
+          lines=['# OpenLLaMA 7B FFN kernel same-runner A/B','',
+                 'Exact same runner, exact same verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg16, batch 32, F16 KV.','',
+                 '| Metric | Baseline | Fused kernel | Improvement |','|---|---:|---:|---:|']
+          for k,label in [('ffn_gemm_ms','FFN GEMM ms'),('prefill_ms','Prefill ms'),('decode_total_ms','Decode ms'),('qkv_projection_ms','QKV ms')]:
+              imp=summary['improvement_pct'].get(k)
+              lines.append(f"| {label} | {b[k]:.2f} | {o[k]:.2f} | {imp:.2f}% |")
+          lines += ['', 'Positive improvement means lower elapsed time for the fused kernel.']
+          (out/'SUMMARY.md').write_text('\n'.join(lines)+'\n')
+          print((out/'SUMMARY.md').read_text())
+          PY
+
+      - name: Record environment
+        run: |
+          {
+            echo "baseline_commit=$BASELINE_COMMIT"
+            echo "optimized_commit=$GITHUB_SHA"
+            echo "model_sha256=$MODEL_SHA256"
+            echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=f16"
+            uname -a
+            lscpu
+            free -h
+          } > sevenb-ffn-kernel-ab/environment.txt
+
+      - name: Upload A/B evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memvanta-sevenb-ffn-kernel-ab
+          path: sevenb-ffn-kernel-ab/**
+          if-no-files-found: error
+          retention-days: 30
