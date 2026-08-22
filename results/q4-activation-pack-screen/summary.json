@@ -1,0 +1,44 @@
+{
+  "winner": null,
+  "rows": {
+    "baseline": {
+      "prefill_ms": 36.42112,
+      "decode_ms": 25.23364,
+      "rss_kib": 26788.0,
+      "prefill_cv": 3.4281821396094188,
+      "decode_cv": 0.578151629046159,
+      "prefill_tps": 1757.2221831728402,
+      "decode_tps": 634.0741961920673,
+      "gain": 0.0,
+      "rss_delta": 0.0,
+      "decode_delta": 0.0,
+      "pass": false
+    },
+    "pack_ffn": {
+      "prefill_ms": 38.39948,
+      "decode_ms": 25.56496,
+      "rss_kib": 26915.2,
+      "prefill_cv": 4.50577677698123,
+      "decode_cv": 1.2443721232305007,
+      "prefill_tps": 1666.6892364167434,
+      "decode_tps": 625.856641277749,
+      "gain": -2.3486819074626353,
+      "rss_delta": 0.474839480364353,
+      "decode_delta": -1.2959926399258803,
+      "pass": false
+    },
+    "pack_all": {
+      "prefill_ms": 39.699980000000004,
+      "decode_ms": 25.29346,
+      "rss_kib": 26852.8,
+      "prefill_cv": 2.373212668549765,
+      "decode_cv": 0.33601403616346776,
+      "prefill_tps": 1612.0914922375275,
+      "decode_tps": 632.574586474132,
+      "gain": -2.497369631915991,
+      "rss_delta": 0.241899357921449,
+      "decode_delta": -0.23650382351800836,
+      "pass": false
+    }
+  }
+}
