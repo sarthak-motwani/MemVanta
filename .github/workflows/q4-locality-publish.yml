@@ -1,0 +1,120 @@
+name: Q4 Locality Screen Publisher
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/q4-locality-publish.yml'
+
+permissions:
+  contents: write
+
+env:
+  MODEL: stories15M-q4_0.gguf
+  MODEL_URL: https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true
+  MODEL_SHA256: 66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739
+  REPS: 5
+  MIN_SPEED_GAIN_PCT: 5
+  MAX_RSS_INCREASE_PCT: 2
+
+jobs:
+  publish-screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl time
+      - name: Download model
+        run: |
+          curl -L --fail --retry 3 --retry-delay 2 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+      - name: Build baseline and prefetch variants
+        run: |
+          set -euo pipefail
+          cp src/gguf_kernels.cpp /tmp/gguf_kernels.baseline.cpp
+          build_variant() {
+            name="$1"; dist="$2"
+            cp /tmp/gguf_kernels.baseline.cpp src/gguf_kernels.cpp
+            if [ "$dist" != "0" ]; then
+              python3 - "$dist" <<'PY'
+          import pathlib, sys
+          p=pathlib.Path('src/gguf_kernels.cpp')
+          s=p.read_text(); d=int(sys.argv[1])
+          needle='for(std::size_t bi=0;bi<nb;++bi){const float d=fp16_to_fp32(w[bi].d);const __m128i packed=_mm_loadu_si128(reinterpret_cast<const __m128i*>(w[bi].qs));'
+          repl=f'for(std::size_t bi=0;bi<nb;++bi){{if(bi+{d}<nb)__builtin_prefetch(w+(bi+{d}),0,1);const float d=fp16_to_fp32(w[bi].d);const __m128i packed=_mm_loadu_si128(reinterpret_cast<const __m128i*>(w[bi].qs));'
+          if needle not in s: raise SystemExit('Q4 batch4 loop pattern not found')
+          p.write_text(s.replace(needle,repl,1))
+          PY
+            fi
+            cmake -S . -B "build-$name" -G Ninja -DCMAKE_BUILD_TYPE=Release
+            cmake --build "build-$name" --target memvanta_profile memvanta_tests memvanta_tokenizer_tests -j "$(nproc)"
+            ctest --test-dir "build-$name" --output-on-failure
+          }
+          build_variant baseline 0
+          build_variant pf1 1
+          build_variant pf2 2
+          build_variant pf4 4
+          build_variant pf8 8
+          cp /tmp/gguf_kernels.baseline.cpp src/gguf_kernels.cpp
+          git diff --exit-code -- src/gguf_kernels.cpp
+      - name: Run RSS-gated screen
+        run: |
+          set -euo pipefail
+          rm -rf results/q4-locality-screen
+          mkdir -p results/q4-locality-screen/raw
+          python3 - <<'PY'
+          import json, os, pathlib, random, re, statistics, subprocess
+          root=pathlib.Path('results/q4-locality-screen'); raw=root/'raw'
+          variants=['baseline','pf1','pf2','pf4','pf8']; reps=int(os.environ['REPS'])
+          order=variants*reps; random.Random(20260822).shuffle(order)
+          data={v:[] for v in variants}
+          mr=re.compile(r'\b(prefill_ms|decode_total_ms)=([0-9.]+)')
+          rr=re.compile(r'Maximum resident set size \(kbytes\):\s*(\d+)')
+          for i,v in enumerate(order,1):
+              env=os.environ.copy(); env.update({'OMP_NUM_THREADS':'4','OMP_DYNAMIC':'FALSE','OMP_PROC_BIND':'close','OMP_PLACES':'cores','MALLOC_ARENA_MAX':'2'})
+              cmd=['/usr/bin/time','-v',f'./build-{v}/memvanta_profile','--model',os.environ['MODEL'],'--threads','4','--ctx','128','--prompt','64','--gen','16','--batch','32','--csv',str(raw/f'{i:02d}-{v}.csv')]
+              p=subprocess.run(cmd,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=180)
+              (raw/f'{i:02d}-{v}.txt').write_text(p.stdout); (raw/f'{i:02d}-{v}.time.txt').write_text(p.stderr)
+              if p.returncode: raise SystemExit(f'{v} failed rc={p.returncode}')
+              m=dict((k,float(x)) for k,x in mr.findall(p.stdout)); r=rr.search(p.stderr)
+              if 'prefill_ms' not in m or 'decode_total_ms' not in m or not r: raise SystemExit(f'missing metrics for {v}')
+              data[v].append((m['prefill_ms'],m['decode_total_ms'],float(r.group(1))))
+          def agg(v):
+              x=data[v]; p=[z[0] for z in x]; d=[z[1] for z in x]; r=[z[2] for z in x]
+              return {'prefill_ms':statistics.mean(p),'decode_ms':statistics.mean(d),'rss_kib':statistics.mean(r),'prefill_cv_pct':100*statistics.stdev(p)/statistics.mean(p),'decode_cv_pct':100*statistics.stdev(d)/statistics.mean(d)}
+          rows={v:agg(v) for v in variants}; base=rows['baseline']
+          def score(r):
+              pt=64000/r['prefill_ms']; dt=16000/r['decode_ms']; return 2/(1/pt+1/dt)
+          bs=score(base); winners=[]
+          for v,r in rows.items():
+              r['prefill_tps']=64000/r['prefill_ms']; r['decode_tps']=16000/r['decode_ms']; r['score']=score(r)
+              r['speed_gain_pct']=(r['score']/bs-1)*100; r['rss_delta_pct']=(r['rss_kib']/base['rss_kib']-1)*100
+              r['pass']=v!='baseline' and r['speed_gain_pct']>=float(os.environ['MIN_SPEED_GAIN_PCT']) and r['rss_delta_pct']<=float(os.environ['MAX_RSS_INCREASE_PCT']) and r['prefill_cv_pct']<=5 and r['decode_cv_pct']<=5
+              if r['pass']: winners.append((r['score'],v))
+          winner=max(winners)[1] if winners else None
+          result={'source_commit':os.environ.get('GITHUB_SHA'),'model_sha256':os.environ['MODEL_SHA256'],'winner':winner,'rows':rows}
+          (root/'summary.json').write_text(json.dumps(result,indent=2)+'\n')
+          lines=['# Q4 locality kernel screen','',f'Exact TinyStories 15M Q4_0; {reps} randomized reps/variant; production source unchanged.','', '| Variant | Prefill tok/s | Decode tok/s | Peak RSS MiB | Combined gain | RSS delta | Pass |','|---|---:|---:|---:|---:|---:|:---:|']
+          for v in variants:
+              r=rows[v]; lines.append(f"| {v} | {r['prefill_tps']:.2f} | {r['decode_tps']:.2f} | {r['rss_kib']/1024:.2f} | {r['speed_gain_pct']:.2f}% | {r['rss_delta_pct']:.2f}% | {'YES' if r['pass'] else 'no'} |")
+          lines += ['',f'Winner: **{winner or "none"}**.','Promotion gate: >=5% combined speed gain, <=2% RSS increase, <=5% timing CV.']
+          (root/'SUMMARY.md').write_text('\n'.join(lines)+'\n')
+          print((root/'SUMMARY.md').read_text())
+          PY
+      - name: Verify production source unchanged
+        run: git diff --exit-code -- src include benchmarks tests CMakeLists.txt
+      - name: Publish compact evidence
+        run: |
+          rm -rf results/q4-locality-screen/raw
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add results/q4-locality-screen/SUMMARY.md results/q4-locality-screen/summary.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Publish Q4 locality screen evidence'
+          git push
