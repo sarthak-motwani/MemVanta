@@ -1,31 +1,184 @@
 {
   "baseline_commit": "ce4413db7eba71cc4349acfe18daa7a62d51f36b",
-  "optimized_commit": "4aca075f10c240a0360a3b5a5c86b4a0ad69d12c",
-  "baseline": {
-    "prefill_ms": 48483.8,
-    "decode_total_ms": 11372.0,
-    "ffn_gemm_ms": 37054.35,
-    "qkv_projection_ms": 14065.55,
-    "attention_output_projection_ms": 4696.16,
-    "output_head_ms": 3040.96,
-    "non_gemm_core_ms": 998.5
+  "optimized_commit": "57d5c0756873d0fc8d2b64448dc0b47a54ba0a3e",
+  "reps": 3,
+  "order": "alternating baseline-first / optimized-first",
+  "aggregate": {
+    "prefill_ms": {
+      "baseline": {
+        "mean": 46356.666666666664,
+        "stdev": 1571.0966053471484,
+        "values": [
+          45572.4,
+          45332.1,
+          48165.5
+        ]
+      },
+      "optimized": {
+        "mean": 45815.666666666664,
+        "stdev": 658.7567254558675,
+        "values": [
+          45975.5,
+          46379.8,
+          45091.7
+        ]
+      },
+      "improvement_pct": 1.1670381822103977
+    },
+    "decode_total_ms": {
+      "baseline": {
+        "mean": 11411.7,
+        "stdev": 15.197697193982968,
+        "values": [
+          11400.5,
+          11429.0,
+          11405.6
+        ]
+      },
+      "optimized": {
+        "mean": 11443.766666666666,
+        "stdev": 33.22564270760398,
+        "values": [
+          11409.0,
+          11447.1,
+          11475.2
+        ]
+      },
+      "improvement_pct": -0.28099815686239293
+    },
+    "ffn_gemm_ms": {
+      "baseline": {
+        "mean": 35772.87,
+        "stdev": 936.3688800894662,
+        "values": [
+          35411.33,
+          35071.17,
+          36836.11
+        ]
+      },
+      "optimized": {
+        "mean": 35444.65666666667,
+        "stdev": 465.00907435590364,
+        "values": [
+          35614.32,
+          35801.01,
+          34918.64
+        ]
+      },
+      "improvement_pct": 0.917492315638452
+    },
+    "qkv_projection_ms": {
+      "baseline": {
+        "mean": 13464.486666666666,
+        "stdev": 504.7299770504356,
+        "values": [
+          13107.24,
+          13244.32,
+          14041.9
+        ]
+      },
+      "optimized": {
+        "mean": 13362.773333333333,
+        "stdev": 180.1997398259311,
+        "values": [
+          13333.52,
+          13555.81,
+          13198.99
+        ]
+      },
+      "improvement_pct": 0.7554193178796752
+    },
+    "attention_output_projection_ms": {
+      "baseline": {
+        "mean": 4466.39,
+        "stdev": 150.48270066688696,
+        "values": [
+          4380.31,
+          4378.71,
+          4640.15
+        ]
+      },
+      "optimized": {
+        "mean": 4404.74,
+        "stdev": 10.48237091501735,
+        "values": [
+          4393.19,
+          4407.38,
+          4413.65
+        ]
+      },
+      "improvement_pct": 1.3803093773718942
+    },
+    "output_head_ms": {
+      "baseline": {
+        "mean": 3044.45,
+        "stdev": 4.265712132809705,
+        "values": [
+          3048.42,
+          3039.94,
+          3044.99
+        ]
+      },
+      "optimized": {
+        "mean": 3047.2933333333335,
+        "stdev": 10.331874628223838,
+        "values": [
+          3044.78,
+          3058.65,
+          3038.45
+        ]
+      },
+      "improvement_pct": -0.09339399015696442
+    },
+    "non_gemm_core_ms": {
+      "baseline": {
+        "mean": 1019.8033333333333,
+        "stdev": 10.58993075205559,
+        "values": [
+          1025.23,
+          1026.58,
+          1007.6
+        ]
+      },
+      "optimized": {
+        "mean": 999.5666666666666,
+        "stdev": 3.5725807665234957,
+        "values": [
+          998.3,
+          1003.6,
+          996.8
+        ]
+      },
+      "improvement_pct": 1.9843695353025597
+    }
   },
-  "optimized": {
-    "prefill_ms": 48102.2,
-    "decode_total_ms": 11387.6,
-    "ffn_gemm_ms": 36654.45,
-    "qkv_projection_ms": 14103.11,
-    "attention_output_projection_ms": 4700.04,
-    "output_head_ms": 3043.95,
-    "non_gemm_core_ms": 987.95
-  },
-  "improvement_pct": {
-    "prefill_ms": 0.7870670203243265,
-    "decode_total_ms": -0.1371790362293384,
-    "ffn_gemm_ms": 1.0792255160325346,
-    "qkv_projection_ms": -0.26703541631860334,
-    "attention_output_projection_ms": -0.0826206943545388,
-    "output_head_ms": -0.09832421340628557,
-    "non_gemm_core_ms": 1.0565848773159694
-  }
+  "paired_improvement_pct": [
+    {
+      "prefill_ms": -0.884526599432987,
+      "decode_total_ms": -0.0745581334152011,
+      "ffn_gemm_ms": -0.5732346116341802,
+      "qkv_projection_ms": -1.7263741260555285,
+      "attention_output_projection_ms": -0.29404311566987723,
+      "output_head_ms": 0.11940611857945665,
+      "non_gemm_core_ms": 2.626727661110196
+    },
+    {
+      "prefill_ms": -2.311165818481836,
+      "decode_total_ms": -0.15836906116020968,
+      "ffn_gemm_ms": -2.081025526094521,
+      "qkv_projection_ms": -2.351876125010569,
+      "attention_output_projection_ms": -0.6547590500398536,
+      "output_head_ms": -0.6154726738027736,
+      "non_gemm_core_ms": 2.2385006526524873
+    },
+    {
+      "prefill_ms": 6.381746270670922,
+      "decode_total_ms": -0.6102265553763095,
+      "ffn_gemm_ms": 5.205408497259893,
+      "qkv_projection_ms": 6.0028201311788285,
+      "attention_output_projection_ms": 4.881307716345377,
+      "output_head_ms": 0.2147790304730053,
+      "non_gemm_core_ms": 1.0718539102818647
+    }
+  ]
 }
