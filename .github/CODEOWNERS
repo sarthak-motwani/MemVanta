@@ -1,0 +1,7 @@
+* @sauravsingla
+
+# Benchmark evidence and reproducibility-sensitive files
+/results/ @sauravsingla
+/docs/MEMORY_BENCHMARKING.md @sauravsingla
+/docs/BENCHMARK_CHECKLIST.md @sauravsingla
+/.github/workflows/ @sauravsingla
