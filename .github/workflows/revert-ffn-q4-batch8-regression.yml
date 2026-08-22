@@ -1,0 +1,66 @@
+name: Revert Q4 FFN Batch8 Regression
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/revert-ffn-q4-batch8-regression.yml'
+
+permissions:
+  contents: write
+
+env:
+  BASELINE_COMMIT: ce4413db7eba71cc4349acfe18daa7a62d51f36b
+
+jobs:
+  revert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Restore only q4_row_batch8_fp32 from measured baseline
+        run: |
+          set -euo pipefail
+          git show "$BASELINE_COMMIT:src/gguf_kernels.cpp" > /tmp/gguf_kernels_baseline.cpp
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          cur = Path('src/gguf_kernels.cpp')
+          base = Path('/tmp/gguf_kernels_baseline.cpp')
+          s = cur.read_text()
+          b = base.read_text()
+          pat = re.compile(r'inline void q4_row_batch8_fp32\(.*?\n\}\n(?=inline void q8_row_batch8_fp32)', re.S)
+          m_cur = pat.search(s)
+          m_base = pat.search(b)
+          if not m_cur or not m_base:
+              raise SystemExit('q4_row_batch8_fp32 function not found; refusing unsafe revert')
+          if m_cur.group(0) == m_base.group(0):
+              raise SystemExit('q4_row_batch8_fp32 already matches baseline')
+          cur.write_text(s[:m_cur.start()] + m_base.group(0) + s[m_cur.end():])
+          PY
+          git diff -- src/gguf_kernels.cpp
+
+      - name: Build and test restored kernel
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build
+          cmake -S . -B build-revert -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-revert --target memvanta_profile memvanta_tests memvanta_tokenizer_tests -j "$(nproc)"
+          ctest --test-dir build-revert --output-on-failure
+
+      - name: Commit tested revert
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/gguf_kernels.cpp
+          git diff --cached --check
+          git commit -m "Revert regressed Q4 FFN batch8 fusion"
+          git pull --rebase origin main
+          git push origin HEAD:main
