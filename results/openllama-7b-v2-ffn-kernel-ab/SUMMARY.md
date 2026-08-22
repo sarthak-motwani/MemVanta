@@ -4,11 +4,11 @@ Exact same runner, exact same verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg1
 
 | Metric | Baseline mean ± SD | Candidate mean ± SD | Improvement |
 |---|---:|---:|---:|
-| FFN GEMM ms | 37137.79 ± 365.79 | 35374.08 ± 743.86 | 4.75% |
-| Prefill ms | 48613.07 ± 413.46 | 45654.50 ± 703.72 | 6.09% |
-| Decode ms | 11402.07 ± 9.75 | 11390.97 ± 12.97 | 0.10% |
-| QKV ms | 14113.02 ± 21.40 | 13298.83 ± 45.51 | 5.77% |
+| FFN GEMM ms | 27999.41 ± 89.30 | 27908.42 ± 211.40 | 0.32% |
+| Prefill ms | 35880.40 ± 71.38 | 35573.77 ± 254.73 | 0.85% |
+| Decode ms | 9766.64 ± 22.89 | 9755.12 ± 15.32 | 0.12% |
+| QKV ms | 10345.02 ± 23.01 | 10297.69 ± 59.39 | 0.46% |
 
 Positive improvement means lower elapsed time for the candidate kernel.
 
-Per-pair FFN improvements: 4.24%, 2.49%, 7.49%
+Per-pair FFN improvements: -0.04%, 0.21%, 0.81%
