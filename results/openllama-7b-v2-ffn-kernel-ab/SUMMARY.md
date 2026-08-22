@@ -4,9 +4,9 @@ Exact same runner, exact same verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg1
 
 | Metric | Baseline | Candidate | Improvement |
 |---|---:|---:|---:|
-| FFN GEMM ms | 39609.35 | 36585.80 | 7.63% |
-| Prefill ms | 51351.50 | 46603.70 | 9.25% |
-| Decode ms | 12785.80 | 12776.40 | 0.07% |
-| QKV ms | 14989.77 | 13696.21 | 8.63% |
+| FFN GEMM ms | 37054.35 | 36654.45 | 1.08% |
+| Prefill ms | 48483.80 | 48102.20 | 0.79% |
+| Decode ms | 11372.00 | 11387.60 | -0.14% |
+| QKV ms | 14065.55 | 14103.11 | -0.27% |
 
 Positive improvement means lower elapsed time for the candidate kernel.

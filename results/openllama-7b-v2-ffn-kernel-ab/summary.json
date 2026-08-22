@@ -1,31 +1,31 @@
 {
   "baseline_commit": "ce4413db7eba71cc4349acfe18daa7a62d51f36b",
-  "optimized_commit": "6199b1238e46d18f2b6632a30768d0251a00425f",
+  "optimized_commit": "4aca075f10c240a0360a3b5a5c86b4a0ad69d12c",
   "baseline": {
-    "prefill_ms": 51351.5,
-    "decode_total_ms": 12785.8,
-    "ffn_gemm_ms": 39609.35,
-    "qkv_projection_ms": 14989.77,
-    "attention_output_projection_ms": 5012.01,
-    "output_head_ms": 3428.86,
-    "non_gemm_core_ms": 1096.78
+    "prefill_ms": 48483.8,
+    "decode_total_ms": 11372.0,
+    "ffn_gemm_ms": 37054.35,
+    "qkv_projection_ms": 14065.55,
+    "attention_output_projection_ms": 4696.16,
+    "output_head_ms": 3040.96,
+    "non_gemm_core_ms": 998.5
   },
   "optimized": {
-    "prefill_ms": 46603.7,
-    "decode_total_ms": 12776.4,
-    "ffn_gemm_ms": 36585.8,
-    "qkv_projection_ms": 13696.21,
-    "attention_output_projection_ms": 4608.69,
-    "output_head_ms": 3419.74,
-    "non_gemm_core_ms": 1069.14
+    "prefill_ms": 48102.2,
+    "decode_total_ms": 11387.6,
+    "ffn_gemm_ms": 36654.45,
+    "qkv_projection_ms": 14103.11,
+    "attention_output_projection_ms": 4700.04,
+    "output_head_ms": 3043.95,
+    "non_gemm_core_ms": 987.95
   },
   "improvement_pct": {
-    "prefill_ms": 9.245689025637036,
-    "decode_total_ms": 0.07351906020741476,
-    "ffn_gemm_ms": 7.633424936283972,
-    "qkv_projection_ms": 8.629618733309458,
-    "attention_output_projection_ms": 8.04707093561267,
-    "output_head_ms": 0.2659776135508695,
-    "non_gemm_core_ms": 2.5201043053301366
+    "prefill_ms": 0.7870670203243265,
+    "decode_total_ms": -0.1371790362293384,
+    "ffn_gemm_ms": 1.0792255160325346,
+    "qkv_projection_ms": -0.26703541631860334,
+    "attention_output_projection_ms": -0.0826206943545388,
+    "output_head_ms": -0.09832421340628557,
+    "non_gemm_core_ms": 1.0565848773159694
   }
 }
