@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+title: MemVanta
+message: "If you use MemVanta or its benchmark methodology/results in research, please cite this repository."
+type: software
+authors:
+  - family-names: Singla
+    given-names: Saurav
+repository-code: "https://github.com/sauravsingla/MemVanta"
+url: "https://github.com/sauravsingla/MemVanta"
+license: Apache-2.0
+abstract: "Experimental C++20 runtime for memory-efficient CPU inference of quantized GGUF language models, with reproducible peak-RSS and constrained-memory benchmarking."
+keywords:
+  - large language models
+  - CPU inference
+  - GGUF
+  - memory efficiency
+  - quantization
+  - edge AI
+  - benchmarking
+date-released: 2026-08-22

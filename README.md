@@ -11,6 +11,20 @@ MemVanta is an experimental C++20 inference runtime for **quantized GGUF languag
 
 > **OpenLLaMA 7B v2 Q4_0:** MemVanta used **47.50% less peak RSS** than pinned llama.cpp on the exact same GGUF across 5 measured CPU runs. Under a separate cgroup-v2 memory sweep with swap disabled, MemVanta completed at a **3584 MiB tested ceiling** where llama.cpp was **OOM-killed**. llama.cpp remains substantially faster, so this is a **memory-efficiency result, not a throughput win**.
 
+## Validation status
+
+| Evidence | Status | Scope |
+|---|---|---|
+| Repeated same-GGUF 7B A/B | **Published** | 5 measured CPU runs with raw evidence |
+| 7B cgroup-v2 memory-pressure sweep | **Published** | Swap disabled; tested memory ceilings retained |
+| Smaller-model A/B results | **Published** | 360M, 1.1B and 3B evidence retained |
+| Physical-CPU reproduction | **Pending** | Current headline evidence should not be generalized beyond tested hosts |
+| Independent third-party reproduction | **Pending / invited** | Reproduction guide and issue template are available |
+| Universal memory-scaling claim | **Not claimed** | Results are scoped to tested models, settings and hardware |
+| Throughput advantage over llama.cpp | **Not claimed** | Throughput is reported as the cost of the memory trade-off |
+
+This distinction is intentional: **published** means evidence exists in this repository; it does not mean the result has already been independently replicated.
+
 ## Who is this for?
 
 MemVanta is currently most useful to:
@@ -115,6 +129,10 @@ The goal is simple:
 Current work is focused on **tightening the 7B/8B memory boundary, reproducing results on physical CPUs, broadening model-family coverage, and strengthening numerical and third-party validation**. Throughput remains reported so the trade-off is visible, but it is not the primary optimization target.
 
 MemVanta is an **engineering prototype under active development**. Published trained-model evidence now reaches 7B and consistently shows lower peak RSS on the tested workloads; it does not establish a universal scaling law or throughput advantage.
+
+## Citation
+
+If MemVanta, its benchmark protocol, or its published measurements are useful in research, please cite the repository using [`CITATION.cff`](CITATION.cff). GitHub can render this metadata through its **Cite this repository** interface.
 
 ## Contributing
 
