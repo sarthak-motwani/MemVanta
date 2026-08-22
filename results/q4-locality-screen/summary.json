@@ -1,0 +1,72 @@
+{
+  "source_commit": "ebd631bc8e3d0ac645dbf09cfb2def7baa3ee185",
+  "model_sha256": "66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739",
+  "winner": null,
+  "rows": {
+    "baseline": {
+      "prefill_ms": 26.3186,
+      "decode_ms": 20.30052,
+      "rss_kib": 26938.4,
+      "prefill_cv_pct": 2.443661195246164,
+      "decode_cv_pct": 0.42980251789319585,
+      "prefill_tps": 2431.7402901370133,
+      "decode_tps": 788.157150654269,
+      "score": 1190.468661470519,
+      "speed_gain_pct": 0.0,
+      "rss_delta_pct": 0.0,
+      "pass": false
+    },
+    "pf1": {
+      "prefill_ms": 26.47996,
+      "decode_ms": 29.835440000000002,
+      "rss_kib": 26941.6,
+      "prefill_cv_pct": 3.61661322153811,
+      "decode_cv_pct": 72.63300868831003,
+      "prefill_tps": 2416.922079942719,
+      "decode_tps": 536.2749803589288,
+      "score": 877.784187431063,
+      "speed_gain_pct": -26.265661932941143,
+      "rss_delta_pct": 0.011878953464194986,
+      "pass": false
+    },
+    "pf2": {
+      "prefill_ms": 26.95948,
+      "decode_ms": 20.05312,
+      "rss_kib": 26979.2,
+      "prefill_cv_pct": 5.654991661403462,
+      "decode_cv_pct": 0.7010073690246187,
+      "prefill_tps": 2373.933028381853,
+      "decode_tps": 797.8808285194524,
+      "score": 1194.3422514620431,
+      "speed_gain_pct": 0.3253836171327018,
+      "rss_delta_pct": 0.15145665666853603,
+      "pass": false
+    },
+    "pf4": {
+      "prefill_ms": 27.73134,
+      "decode_ms": 20.78798,
+      "rss_kib": 27052.8,
+      "prefill_cv_pct": 5.398694507117512,
+      "decode_cv_pct": 6.619060775384311,
+      "prefill_tps": 2307.8581849993548,
+      "decode_tps": 769.6755528916229,
+      "score": 1154.3672146724402,
+      "speed_gain_pct": -3.03254070993223,
+      "rss_delta_pct": 0.4246725863451317,
+      "pass": false
+    },
+    "pf8": {
+      "prefill_ms": 27.33182,
+      "decode_ms": 23.25798,
+      "rss_kib": 26947.2,
+      "prefill_cv_pct": 7.450686088137325,
+      "decode_cv_pct": 27.414019629950495,
+      "prefill_tps": 2341.593058932775,
+      "decode_tps": 687.9359256478851,
+      "score": 1063.4431931078248,
+      "speed_gain_pct": -10.670206824746387,
+      "rss_delta_pct": 0.03266712202654176,
+      "pass": false
+    }
+  }
+}
