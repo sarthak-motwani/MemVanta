@@ -6,7 +6,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/q4-multirow-tile-screen.yml
-      - .github/scripts/q4_multirow_tile_screen.py
+      - .github/scripts/q4_multirow_tile_screen_v2.py
 
 permissions:
   contents: write
@@ -31,7 +31,7 @@ jobs:
           curl -L --fail --retry 3 --retry-delay 2 "$MODEL_URL" -o "$MODEL"
           echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
       - name: Run multi-row tile screen
-        run: python3 .github/scripts/q4_multirow_tile_screen.py
+        run: python3 .github/scripts/q4_multirow_tile_screen_v2.py
       - name: Verify production source unchanged
         run: git diff --exit-code -- src include benchmarks tests CMakeLists.txt
       - name: Publish evidence
