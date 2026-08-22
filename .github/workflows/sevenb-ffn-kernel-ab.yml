@@ -12,7 +12,7 @@ env:
   MODEL_URL: https://huggingface.co/maddes8cht/openlm-research-open_llama_7b_v2-gguf/resolve/main/openlm-research-open_llama_7b_v2-Q4_0.gguf?download=true
   MODEL_SHA256: 892f6e2e840ed98bb7bc1d74da67ae0cca52b2d90b0316d0a7e66a37a5a60760
   BASELINE_COMMIT: ce4413db7eba71cc4349acfe18daa7a62d51f36b
-  AB_SCHEMA: 1
+  AB_SCHEMA: 2
   THREADS: 4
   CTX: 256
   PROMPT: 128
@@ -94,11 +94,11 @@ jobs:
           (out/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
           lines=['# OpenLLaMA 7B FFN kernel same-runner A/B','',
                  'Exact same runner, exact same verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg16, batch 32, F16 KV.','',
-                 '| Metric | Baseline | Fused kernel | Improvement |','|---|---:|---:|---:|']
+                 '| Metric | Baseline | Candidate | Improvement |','|---|---:|---:|---:|']
           for k,label in [('ffn_gemm_ms','FFN GEMM ms'),('prefill_ms','Prefill ms'),('decode_total_ms','Decode ms'),('qkv_projection_ms','QKV ms')]:
               imp=summary['improvement_pct'].get(k)
               lines.append(f"| {label} | {b[k]:.2f} | {o[k]:.2f} | {imp:.2f}% |")
-          lines += ['', 'Positive improvement means lower elapsed time for the fused kernel.']
+          lines += ['', 'Positive improvement means lower elapsed time for the candidate kernel.']
           (out/'SUMMARY.md').write_text('\n'.join(lines)+'\n')
           print((out/'SUMMARY.md').read_text())
           PY
