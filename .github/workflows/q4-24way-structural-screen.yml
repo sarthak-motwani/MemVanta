@@ -1,0 +1,158 @@
+name: Q4 24-Way Structural Throughput Screen
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/q4-24way-structural-screen.yml'
+
+permissions:
+  contents: write
+
+env:
+  MODEL: stories15M-q4_0.gguf
+  MODEL_URL: https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true
+  MODEL_SHA256: 66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739
+  REPS: 3
+  MIN_SPEED_GAIN_PCT: 8
+  MAX_RSS_INCREASE_PCT: 2
+  MAX_CV_PCT: 5
+  MAX_DECODE_REGRESSION_PCT: 2
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl time
+
+      - name: Download exact trained model
+        run: |
+          curl -L --fail --retry 3 --retry-delay 2 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+
+      - name: Build 24 isolated variants
+        run: |
+          set -euo pipefail
+          cp src/gguf_kernels.cpp /tmp/gguf_kernels.baseline.cpp
+          python3 - <<'PY'
+          import pathlib
+          root=pathlib.Path('.')
+          src=(root/'src/gguf_kernels.cpp').read_text()
+          dot_old='''const __m128i mask=_mm_set1_epi8(0x0f),bias=_mm_set1_epi8(8);\n        const __m128i qlo=_mm_sub_epi8(_mm_and_si128(packed,mask),bias);\n        const __m128i qhi=_mm_sub_epi8(_mm_and_si128(_mm_srli_epi16(packed,4),mask),bias);'''
+          dot_new='''const __m128i mask=_mm_set1_epi8(0x0f);\n        const __m128i qlut=_mm_setr_epi8(-8,-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7);\n        const __m128i qlo=_mm_shuffle_epi8(qlut,_mm_and_si128(packed,mask));\n        const __m128i qhi=_mm_shuffle_epi8(qlut,_mm_and_si128(_mm_srli_epi16(packed,4),mask));'''
+          batch_decl='__m256 a0=_mm256_setzero_ps(),a1=_mm256_setzero_ps(),a2=_mm256_setzero_ps(),a3=_mm256_setzero_ps();const __m128i mask=_mm_set1_epi8(0x0f),bias=_mm_set1_epi8(8);'
+          batch_decl_lut='__m256 a0=_mm256_setzero_ps(),a1=_mm256_setzero_ps(),a2=_mm256_setzero_ps(),a3=_mm256_setzero_ps();const __m128i mask=_mm_set1_epi8(0x0f);const __m128i qlut=_mm_setr_epi8(-8,-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7);'
+          batch_unpack='const __m128i lo=_mm_sub_epi8(_mm_and_si128(packed,mask),bias),hi=_mm_sub_epi8(_mm_and_si128(_mm_srli_epi16(packed,4),mask),bias);'
+          batch_unpack_lut='const __m128i lo=_mm_shuffle_epi8(qlut,_mm_and_si128(packed,mask)),hi=_mm_shuffle_epi8(qlut,_mm_and_si128(_mm_srli_epi16(packed,4),mask));'
+          if dot_old not in src or batch_decl not in src or batch_unpack not in src:
+              raise SystemExit('expected Q4 source patterns not found')
+          modes={}
+          modes['base']=src
+          modes['batchlut']=src.replace(batch_decl,batch_decl_lut,1).replace(batch_unpack,batch_unpack_lut,1)
+          modes['dotlut']=src.replace(dot_old,dot_new,1)
+          modes['bothlut']=modes['dotlut'].replace(batch_decl,batch_decl_lut,1).replace(batch_unpack,batch_unpack_lut,1)
+          for name,text in modes.items():
+              pathlib.Path(f'/tmp/gguf_{name}.cpp').write_text(text)
+          PY
+
+          declare -A FLAGS
+          FLAGS[base]=""
+          FLAGS[unroll]="-funroll-loops"
+          FLAGS[align32]="-falign-loops=32"
+          FLAGS[align64]="-falign-loops=64"
+          FLAGS[unroll32]="-funroll-loops -falign-loops=32"
+          FLAGS[mathsafe]="-fno-math-errno -fno-trapping-math"
+
+          for mode in base batchlut dotlut bothlut; do
+            for opt in base unroll align32 align64 unroll32 mathsafe; do
+              name="${mode}__${opt}"
+              cp "/tmp/gguf_${mode}.cpp" src/gguf_kernels.cpp
+              cmake -S . -B "build-${name}" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="${FLAGS[$opt]}"
+              cmake --build "build-${name}" --target memvanta_profile memvanta_tests memvanta_tokenizer_tests -j "$(nproc)"
+              ctest --test-dir "build-${name}" --output-on-failure
+            done
+          done
+          cp /tmp/gguf_kernels.baseline.cpp src/gguf_kernels.cpp
+          git diff --exit-code -- src/gguf_kernels.cpp
+
+      - name: Run randomized 24-way RSS-gated screen
+        run: |
+          set -euo pipefail
+          mkdir -p results/q4-24way-structural-screen/raw
+          python3 - <<'PY'
+          import json, os, pathlib, random, re, statistics, subprocess
+          root=pathlib.Path('results/q4-24way-structural-screen'); raw=root/'raw'
+          modes=['base','batchlut','dotlut','bothlut']
+          opts=['base','unroll','align32','align64','unroll32','mathsafe']
+          variants=[f'{m}__{o}' for m in modes for o in opts]
+          reps=int(os.environ['REPS'])
+          order=[]
+          rng=random.Random(20260822)
+          for r in range(reps):
+              block=variants.copy(); rng.shuffle(block); order += block
+          data={v:[] for v in variants}
+          metric_re=re.compile(r'\b(prefill_ms|decode_total_ms)=([0-9.]+)')
+          rss_re=re.compile(r'Maximum resident set size \(kbytes\):\s*(\d+)')
+          for i,v in enumerate(order,1):
+              env=os.environ.copy(); env.update({'OMP_NUM_THREADS':'4','OMP_DYNAMIC':'FALSE','OMP_PROC_BIND':'close','OMP_PLACES':'cores','MALLOC_ARENA_MAX':'2'})
+              cmd=['/usr/bin/time','-v',f'./build-{v}/memvanta_profile','--model',os.environ['MODEL'],'--threads','4','--ctx','128','--prompt','64','--gen','16','--batch','32','--csv',str(raw/f'{i:03d}-{v}.csv')]
+              p=subprocess.run(cmd,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=180)
+              (raw/f'{i:03d}-{v}.txt').write_text(p.stdout); (raw/f'{i:03d}-{v}.time.txt').write_text(p.stderr)
+              if p.returncode: raise SystemExit(f'{v} failed rc={p.returncode}')
+              m=dict((k,float(x)) for k,x in metric_re.findall(p.stdout)); rr=rss_re.search(p.stderr)
+              if 'prefill_ms' not in m or 'decode_total_ms' not in m or not rr: raise SystemExit(f'missing metrics for {v}')
+              data[v].append((m['prefill_ms'],m['decode_total_ms'],float(rr.group(1))))
+          def agg(v):
+              xs=data[v]; pm=[x[0] for x in xs]; dm=[x[1] for x in xs]; rm=[x[2] for x in xs]
+              return {'prefill_ms':statistics.mean(pm),'decode_ms':statistics.mean(dm),'rss_kib':statistics.mean(rm),
+                      'prefill_cv_pct':100*statistics.stdev(pm)/statistics.mean(pm),
+                      'decode_cv_pct':100*statistics.stdev(dm)/statistics.mean(dm),
+                      'rss_cv_pct':100*statistics.stdev(rm)/statistics.mean(rm)}
+          rows={v:agg(v) for v in variants}; b=rows['base__base']
+          def score(r):
+              pt=64*1000/r['prefill_ms']; dt=16*1000/r['decode_ms']; return 2/(1/pt+1/dt)
+          bs=score(b); passing=[]
+          for v,r in rows.items():
+              r['prefill_tps']=64*1000/r['prefill_ms']; r['decode_tps']=16*1000/r['decode_ms']; r['score']=score(r)
+              r['speed_gain_pct']=(r['score']/bs-1)*100
+              r['rss_delta_pct']=(r['rss_kib']/b['rss_kib']-1)*100
+              r['decode_delta_pct']=(r['decode_tps']/ (16*1000/b['decode_ms']) -1)*100
+              r['pass']=(v!='base__base' and r['speed_gain_pct']>=float(os.environ['MIN_SPEED_GAIN_PCT']) and
+                         r['rss_delta_pct']<=float(os.environ['MAX_RSS_INCREASE_PCT']) and
+                         r['prefill_cv_pct']<=float(os.environ['MAX_CV_PCT']) and r['decode_cv_pct']<=float(os.environ['MAX_CV_PCT']) and
+                         r['decode_delta_pct']>=-float(os.environ['MAX_DECODE_REGRESSION_PCT']))
+              if r['pass']: passing.append((r['score'],v))
+          winner=max(passing)[1] if passing else None
+          ranked=sorted(variants,key=lambda v:rows[v]['score'],reverse=True)
+          result={'source_commit':os.environ.get('GITHUB_SHA'),'model_sha256':os.environ['MODEL_SHA256'],'winner':winner,'variant_count':len(variants),'rows':rows}
+          (root/'summary.json').write_text(json.dumps(result,indent=2)+'\n')
+          lines=['# Q4 24-way structural throughput screen','',f'Exact TinyStories 15M Q4_0; {len(variants)} variants x {reps} randomized reps; production source restored.','',
+                 '| Rank | Variant | Prefill tok/s | Decode tok/s | Combined gain | RSS delta | Prefill CV | Decode CV | Pass |',
+                 '|---:|---|---:|---:|---:|---:|---:|---:|:---:|']
+          for rank,v in enumerate(ranked,1):
+              r=rows[v]; lines.append(f"| {rank} | {v} | {r['prefill_tps']:.2f} | {r['decode_tps']:.2f} | {r['speed_gain_pct']:.2f}% | {r['rss_delta_pct']:.2f}% | {r['prefill_cv_pct']:.2f}% | {r['decode_cv_pct']:.2f}% | {'YES' if r['pass'] else 'no'} |")
+          lines += ['',f'Winner: **{winner or "none"}**.', 'Promotion requires >=8% combined speed gain, <=2% RSS increase, <=5% timing CV, and <=2% decode regression.']
+          (root/'SUMMARY.md').write_text('\n'.join(lines)+'\n')
+          print((root/'SUMMARY.md').read_text())
+          PY
+
+      - name: Verify production source unchanged
+        run: git diff --exit-code -- src include benchmarks tests CMakeLists.txt
+
+      - name: Publish compact evidence
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add results/q4-24way-structural-screen/SUMMARY.md results/q4-24way-structural-screen/summary.json
+          git commit -m 'Publish Q4 24-way structural screen evidence'
+          git push
