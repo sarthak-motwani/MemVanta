@@ -1,0 +1,31 @@
+{
+  "baseline_commit": "ce4413db7eba71cc4349acfe18daa7a62d51f36b",
+  "optimized_commit": "0639f532c5a974b7e8a1e64c9ae620ddde9c1a75",
+  "baseline": {
+    "prefill_ms": 48204.3,
+    "decode_total_ms": 11429.2,
+    "ffn_gemm_ms": 36805.15,
+    "qkv_projection_ms": 13989.61,
+    "attention_output_projection_ms": 4756.59,
+    "output_head_ms": 3044.92,
+    "non_gemm_core_ms": 1036.89
+  },
+  "optimized": {
+    "prefill_ms": 67246.6,
+    "decode_total_ms": 11542.7,
+    "ffn_gemm_ms": 55685.41,
+    "qkv_projection_ms": 14119.47,
+    "attention_output_projection_ms": 4875.83,
+    "output_head_ms": 3093.55,
+    "non_gemm_core_ms": 1014.37
+  },
+  "improvement_pct": {
+    "prefill_ms": -39.50332231771855,
+    "decode_total_ms": -0.9930703811290379,
+    "ffn_gemm_ms": -51.297875433193454,
+    "qkv_projection_ms": -0.9282603303451544,
+    "attention_output_projection_ms": -2.5068378817598274,
+    "output_head_ms": -1.597086294549614,
+    "non_gemm_core_ms": 2.171879370039261
+  }
+}
