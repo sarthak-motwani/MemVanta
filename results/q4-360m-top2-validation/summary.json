@@ -1,0 +1,49 @@
+{
+  "source_commit": "4cc020233e81dbdb3088070e86d6b335f3c2d44b",
+  "model_sha256": "88bbd5cac17036bf50905a0a660078b63426cea1c7fc6e4afa955bc8422b043c",
+  "winner": "batchlut_unroll",
+  "rows": {
+    "baseline": {
+      "prefill_ms": 1263.218,
+      "decode_ms": 551.6408,
+      "rss_kib": 251064.8,
+      "prefill_cv_pct": 0.6542878083442919,
+      "decode_cv_pct": 0.39703182490803474,
+      "rss_cv_pct": 0.030983817500585313,
+      "prefill_tps": 50.664255892490445,
+      "decode_tps": 29.004381111766932,
+      "score": 36.88993415492596,
+      "speed_gain_pct": 0.0,
+      "rss_delta_pct": 0.0,
+      "pass": false
+    },
+    "unroll": {
+      "prefill_ms": 1269.744,
+      "decode_ms": 541.8164,
+      "rss_kib": 251183.2,
+      "prefill_cv_pct": 0.9540024178659251,
+      "decode_cv_pct": 4.214261908183454,
+      "rss_cv_pct": 0.03447600056576862,
+      "prefill_tps": 50.40386093574768,
+      "decode_tps": 29.53029845534391,
+      "score": 37.24167660165976,
+      "speed_gain_pct": 0.9534916632179202,
+      "rss_delta_pct": 0.04715913979180808,
+      "pass": false
+    },
+    "batchlut_unroll": {
+      "prefill_ms": 1141.486,
+      "decode_ms": 528.8464,
+      "rss_kib": 251022.4,
+      "prefill_cv_pct": 0.1977612222251095,
+      "decode_cv_pct": 0.16200292504471706,
+      "rss_cv_pct": 0.05641245935965144,
+      "prefill_tps": 56.06726670322719,
+      "decode_tps": 30.254531372436304,
+      "score": 39.30151867209011,
+      "speed_gain_pct": 6.537242671771293,
+      "rss_delta_pct": -0.01688807033084494,
+      "pass": true
+    }
+  }
+}
