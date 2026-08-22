@@ -1,0 +1,44 @@
+name: Q4 Multi-Row Tile Screen
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/q4-multirow-tile-screen.yml
+      - .github/scripts/q4_multirow_tile_screen.py
+
+permissions:
+  contents: write
+
+env:
+  MODEL: stories15M-q4_0.gguf
+  MODEL_URL: https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true
+  MODEL_SHA256: 66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build curl time python3
+      - name: Download exact model
+        run: |
+          curl -L --fail --retry 3 --retry-delay 2 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+      - name: Run multi-row tile screen
+        run: python3 .github/scripts/q4_multirow_tile_screen.py
+      - name: Verify production source unchanged
+        run: git diff --exit-code -- src include benchmarks tests CMakeLists.txt
+      - name: Publish evidence
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add results/q4-multirow-tile-screen/SUMMARY.md results/q4-multirow-tile-screen/summary.json
+          git commit -m 'Publish Q4 multi-row tile evidence'
+          git pull --rebase origin main
+          git push
