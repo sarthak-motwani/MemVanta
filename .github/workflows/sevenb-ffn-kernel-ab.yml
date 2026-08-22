@@ -12,7 +12,7 @@ env:
   MODEL_URL: https://huggingface.co/maddes8cht/openlm-research-open_llama_7b_v2-gguf/resolve/main/openlm-research-open_llama_7b_v2-Q4_0.gguf?download=true
   MODEL_SHA256: 892f6e2e840ed98bb7bc1d74da67ae0cca52b2d90b0316d0a7e66a37a5a60760
   BASELINE_COMMIT: ce4413db7eba71cc4349acfe18daa7a62d51f36b
-  AB_SCHEMA: 4
+  AB_SCHEMA: 5
   REPS: 3
   THREADS: 4
   CTX: 256
