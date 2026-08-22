@@ -270,4 +270,48 @@ void tensor_matmul_batch_v06(const GgufFile&file,const GgufTensor&t,const float*
     profile_add(t,batch,std::chrono::duration<double,std::milli>(Clock::now()-t0).count());
 }
 
+
+void tensor_ffn_gate_up_batch_v06(const GgufFile&file,const GgufTensor&gate,const GgufTensor&up,const float*x,float*ff,std::size_t batch,unsigned threads,WorkerPool*pool){
+    const auto t0=Clock::now();
+    if(gate.dims.size()<2||up.dims.size()<2||gate.ne(0)!=up.ne(0)||gate.ne(1)!=up.ne(1))throw std::runtime_error("fused FFN gate/up shape mismatch");
+    const std::size_t cols=gate.ne(0),rows=gate.ne(1);
+    const bool packed=(gate.type==GgmlType::Q4_0||gate.type==GgmlType::Q8_0)&&up.type==gate.type&&cols%32==0&&batch>=2;
+    if(!packed){
+        std::vector<float> g(batch*rows),u(batch*rows);
+        tensor_matmul_batch_v06(file,gate,x,g.data(),batch,threads,pool);
+        tensor_matmul_batch_v06(file,up,x,u.data(),batch,threads,pool);
+        parallel_rows(batch*rows,threads,pool,[&](std::size_t a,std::size_t z){for(std::size_t i=a;i<z;++i){const float v=g[i];ff[i]=(v/(1.0f+std::exp(-v)))*u[i];}});
+        return;
+    }
+    const std::byte*pg=file.tensor_data(gate),*pu=file.tensor_data(up);const std::size_t nb=cols/32;
+    parallel_rows(rows,threads,pool,[&](std::size_t r0,std::size_t r1){
+        for(std::size_t r=r0;r<r1;++r){
+            std::size_t b=0;
+            for(;b+8<=batch;b+=8){
+                float g[8],u[8];
+                if(gate.type==GgmlType::Q4_0){
+                    q4_row_batch8_fp32(reinterpret_cast<const GgufBlockQ4_0*>(pg)+r*nb,x+b*cols,cols,nb,g);
+                    q4_row_batch8_fp32(reinterpret_cast<const GgufBlockQ4_0*>(pu)+r*nb,x+b*cols,cols,nb,u);
+                }else{
+                    q8_row_batch8_fp32(reinterpret_cast<const GgufBlockQ8_0*>(pg)+r*nb,x+b*cols,cols,nb,g);
+                    q8_row_batch8_fp32(reinterpret_cast<const GgufBlockQ8_0*>(pu)+r*nb,x+b*cols,cols,nb,u);
+                }
+                for(int j=0;j<8;++j){const float v=g[j];ff[(b+j)*rows+r]=(v/(1.0f+std::exp(-v)))*u[j];}
+            }
+            for(;b<batch;++b){
+                float g,u;
+                if(gate.type==GgmlType::Q4_0){
+                    g=dot_q4_0_fp32(reinterpret_cast<const GgufBlockQ4_0*>(pg)+r*nb,x+b*cols,cols);
+                    u=dot_q4_0_fp32(reinterpret_cast<const GgufBlockQ4_0*>(pu)+r*nb,x+b*cols,cols);
+                }else{
+                    g=dot_q8_0_fp32(reinterpret_cast<const GgufBlockQ8_0*>(pg)+r*nb,x+b*cols,cols);
+                    u=dot_q8_0_fp32(reinterpret_cast<const GgufBlockQ8_0*>(pu)+r*nb,x+b*cols,cols);
+                }
+                ff[b*rows+r]=(g/(1.0f+std::exp(-g)))*u;
+            }
+        }
+    });
+    profile_add(gate,batch,std::chrono::duration<double,std::milli>(Clock::now()-t0).count());
+}
+
 } // namespace memvanta
