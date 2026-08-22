@@ -12,7 +12,8 @@ env:
   MODEL_URL: https://huggingface.co/maddes8cht/openlm-research-open_llama_7b_v2-gguf/resolve/main/openlm-research-open_llama_7b_v2-Q4_0.gguf?download=true
   MODEL_SHA256: 892f6e2e840ed98bb7bc1d74da67ae0cca52b2d90b0316d0a7e66a37a5a60760
   BASELINE_COMMIT: ce4413db7eba71cc4349acfe18daa7a62d51f36b
-  AB_SCHEMA: 3
+  AB_SCHEMA: 4
+  REPS: 3
   THREADS: 4
   CTX: 256
   PROMPT: 128
@@ -27,7 +28,7 @@ env:
 jobs:
   compare:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - name: Checkout optimized main
         uses: actions/checkout@v4
@@ -63,42 +64,71 @@ jobs:
           curl -L --fail --retry 3 --retry-delay 3 "$MODEL_URL" -o "$MODEL"
           echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
 
-      - name: Run same-runner A/B
+      - name: Run repeated alternating same-runner A/B
         run: |
           set -euo pipefail
           mkdir -p sevenb-ffn-kernel-ab
-          for variant in baseline optimized; do
+          run_one() {
+            variant="$1"
+            rep="$2"
             ./$variant/build/memvanta_profile \
               --model "$MODEL" --threads "$THREADS" --ctx "$CTX" \
               --prompt "$PROMPT" --gen "$GEN" --batch "$BATCH" \
-              --csv "sevenb-ffn-kernel-ab/${variant}.csv" \
-              > "sevenb-ffn-kernel-ab/${variant}.txt"
+              --csv "sevenb-ffn-kernel-ab/${variant}-${rep}.csv" \
+              > "sevenb-ffn-kernel-ab/${variant}-${rep}.txt"
+          }
+          for rep in $(seq 1 "$REPS"); do
+            if [ $((rep % 2)) -eq 1 ]; then
+              run_one baseline "$rep"
+              run_one optimized "$rep"
+            else
+              run_one optimized "$rep"
+              run_one baseline "$rep"
+            fi
           done
           python3 - <<'PY'
-          import pathlib,re,json
+          import json, os, pathlib, re, statistics
           out=pathlib.Path('sevenb-ffn-kernel-ab')
-          def parse(name):
-              s=(out/f'{name}.txt').read_text()
-              def val(k):
+          reps=int(os.environ['REPS'])
+          keys=['prefill_ms','decode_total_ms','ffn_gemm_ms','qkv_projection_ms','attention_output_projection_ms','output_head_ms','non_gemm_core_ms']
+          def parse(path):
+              s=path.read_text()
+              vals={}
+              for k in keys:
                   m=re.search(rf'\b{k}=([0-9.]+)',s)
-                  return float(m.group(1)) if m else None
-              return {k:val(k) for k in ['prefill_ms','decode_total_ms','ffn_gemm_ms','qkv_projection_ms','attention_output_projection_ms','output_head_ms','non_gemm_core_ms']}
-          b=parse('baseline'); o=parse('optimized')
+                  vals[k]=float(m.group(1)) if m else None
+              return vals
+          raw={'baseline':[],'optimized':[]}
+          for rep in range(1,reps+1):
+              raw['baseline'].append(parse(out/f'baseline-{rep}.txt'))
+              raw['optimized'].append(parse(out/f'optimized-{rep}.txt'))
+          def stats(variant,k):
+              xs=[r[k] for r in raw[variant] if r[k] is not None]
+              return {'mean':statistics.mean(xs),'stdev':statistics.stdev(xs) if len(xs)>1 else 0.0,'values':xs}
           def pct(old,new): return (old-new)*100.0/old if old else None
+          aggregate={}
+          for k in keys:
+              b=stats('baseline',k); o=stats('optimized',k)
+              aggregate[k]={'baseline':b,'optimized':o,'improvement_pct':pct(b['mean'],o['mean'])}
+          paired=[]
+          for rep in range(reps):
+              paired.append({k:pct(raw['baseline'][rep][k],raw['optimized'][rep][k]) for k in keys})
           summary={
-              'baseline_commit':'ce4413db7eba71cc4349acfe18daa7a62d51f36b',
-              'optimized_commit':__import__('os').environ.get('GITHUB_SHA'),
-              'baseline':b,'optimized':o,
-              'improvement_pct':{k:pct(b[k],o[k]) for k in b if b[k] is not None and o[k] is not None}
+              'baseline_commit':os.environ['BASELINE_COMMIT'],
+              'optimized_commit':os.environ.get('GITHUB_SHA'),
+              'reps':reps,
+              'order':'alternating baseline-first / optimized-first',
+              'aggregate':aggregate,
+              'paired_improvement_pct':paired,
           }
           (out/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
-          lines=['# OpenLLaMA 7B FFN kernel same-runner A/B','',
-                 'Exact same runner, exact same verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg16, batch 32, F16 KV.','',
-                 '| Metric | Baseline | Candidate | Improvement |','|---|---:|---:|---:|']
+          lines=['# OpenLLaMA 7B FFN kernel repeated same-runner A/B','',
+                 f'Exact same runner, exact same verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg16, batch 32, F16 KV; {reps} alternating-order pairs.','',
+                 '| Metric | Baseline mean ± SD | Candidate mean ± SD | Improvement |','|---|---:|---:|---:|']
           for k,label in [('ffn_gemm_ms','FFN GEMM ms'),('prefill_ms','Prefill ms'),('decode_total_ms','Decode ms'),('qkv_projection_ms','QKV ms')]:
-              imp=summary['improvement_pct'].get(k)
-              lines.append(f"| {label} | {b[k]:.2f} | {o[k]:.2f} | {imp:.2f}% |")
-          lines += ['', 'Positive improvement means lower elapsed time for the candidate kernel.']
+              a=aggregate[k]
+              lines.append(f"| {label} | {a['baseline']['mean']:.2f} ± {a['baseline']['stdev']:.2f} | {a['optimized']['mean']:.2f} ± {a['optimized']['stdev']:.2f} | {a['improvement_pct']:.2f}% |")
+          lines += ['', 'Positive improvement means lower elapsed time for the candidate kernel.', '', 'Per-pair FFN improvements: ' + ', '.join(f"{p['ffn_gemm_ms']:.2f}%" for p in paired)]
           (out/'SUMMARY.md').write_text('\n'.join(lines)+'\n')
           print((out/'SUMMARY.md').read_text())
           PY
@@ -109,6 +139,7 @@ jobs:
             echo "baseline_commit=$BASELINE_COMMIT"
             echo "optimized_commit=$GITHUB_SHA"
             echo "ab_schema=$AB_SCHEMA"
+            echo "reps=$REPS"
             echo "model_sha256=$MODEL_SHA256"
             echo "threads=$THREADS prompt=$PROMPT gen=$GEN ctx=$CTX batch=$BATCH kv=f16"
             uname -a
