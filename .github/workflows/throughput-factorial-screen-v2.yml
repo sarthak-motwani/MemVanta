@@ -1,0 +1,139 @@
+name: Throughput Factorial Screen RSS Gated
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/throughput-factorial-screen-v2.yml'
+
+permissions:
+  contents: write
+
+env:
+  MODEL: stories15M-q4_0.gguf
+  MODEL_URL: https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true
+  MODEL_SHA256: 66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739
+  CTX: 128
+  PROMPT: 64
+  GEN: 16
+  REPS: 3
+  SCREEN_SCHEMA: 2
+  MAX_RSS_INCREASE_PCT: 2.0
+
+jobs:
+  factorial-screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl time
+
+      - name: Build and test stable source
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target memvanta_profile memvanta_tests memvanta_tokenizer_tests -j "$(nproc)"
+          ctest --test-dir build --output-on-failure
+
+      - name: Download exact small trained model
+        run: |
+          curl -L --fail --retry 3 --retry-delay 2 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+
+      - name: Run 32-way speed and memory screen
+        run: |
+          set -euo pipefail
+          mkdir -p throughput-factorial-screen/raw
+          python3 - <<'PY'
+          import itertools,json,os,pathlib,random,re,statistics,subprocess
+          root=pathlib.Path('throughput-factorial-screen'); raw=root/'raw'
+          model=os.environ['MODEL']; ctx=int(os.environ['CTX']); prompt=int(os.environ['PROMPT']); gen=int(os.environ['GEN']); reps=int(os.environ['REPS'])
+          max_rss_inc=float(os.environ['MAX_RSS_INCREASE_PCT'])
+          threads=[2,4]; batches=[8,16,32,64]; q8acts=[0,1]; binds=['close','spread']
+          configs=list(itertools.product(threads,batches,q8acts,binds)); random.Random(20260822).shuffle(configs)
+          keys=['prefill_ms','decode_total_ms','ffn_gemm_ms','qkv_projection_ms','non_gemm_core_ms']
+          def parse_profile(text):
+              d={}
+              for k in keys:
+                  m=re.search(rf'\b{k}=([0-9.]+)',text); d[k]=float(m.group(1)) if m else None
+              return d
+          def run_one(tag,t,b,q8,bind,rep):
+              env=os.environ.copy(); env.update({'OMP_NUM_THREADS':str(t),'OMP_DYNAMIC':'FALSE','OMP_PROC_BIND':bind,'OMP_PLACES':'cores','MALLOC_ARENA_MAX':'2'})
+              if q8: env['MEMVANTA_FORCE_Q8_ACT']='1'
+              else: env.pop('MEMVANTA_FORCE_Q8_ACT',None)
+              out=raw/f'{tag}-r{rep}.txt'; tm=raw/f'{tag}-r{rep}.time.txt'; csv=raw/f'{tag}-r{rep}.csv'
+              cmd=['/usr/bin/time','-v','-o',str(tm),'./build/memvanta_profile','--model',model,'--threads',str(t),'--ctx',str(ctx),'--prompt',str(prompt),'--gen',str(gen),'--batch',str(b),'--csv',str(csv)]
+              p=subprocess.run(cmd,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=150)
+              out.write_text(p.stdout)
+              if p.returncode: raise RuntimeError(f'{tag} rep {rep} rc={p.returncode}\n{p.stdout[-2000:]}')
+              vals=parse_profile(p.stdout)
+              mt=re.search(r'Maximum resident set size \(kbytes\):\s*(\d+)',tm.read_text())
+              vals['peak_rss_kib']=int(mt.group(1)) if mt else None
+              if vals['prefill_ms'] is None or vals['decode_total_ms'] is None or vals['peak_rss_kib'] is None: raise RuntimeError(f'{tag} rep {rep}: missing metrics')
+              return vals
+          control=(4,32,0,'close')
+          control_start=[run_one('control-start',*control,r) for r in range(1,reps+1)]
+          rows=[]
+          for idx,(t,b,q8,bind) in enumerate(configs,1):
+              tag=f'c{idx:02d}-t{t}-b{b}-q8{q8}-{bind}'; vals=[run_one(tag,t,b,q8,bind,r) for r in range(1,reps+1)]
+              def stat(k):
+                  xs=[v[k] for v in vals]; return statistics.mean(xs),statistics.stdev(xs) if len(xs)>1 else 0.0
+              pm,ps=stat('prefill_ms'); dm,ds=stat('decode_total_ms'); fm,fs=stat('ffn_gemm_ms'); rm,rs=stat('peak_rss_kib')
+              pt=prompt*1000/pm; dt=gen*1000/dm; score=2/(1/pt+1/dt)
+              rows.append({'tag':tag,'threads':t,'batch':b,'q8act':q8,'bind':bind,'prefill_ms_mean':pm,'prefill_ms_sd':ps,'decode_ms_mean':dm,'decode_ms_sd':ds,'ffn_ms_mean':fm,'ffn_ms_sd':fs,'peak_rss_kib_mean':rm,'peak_rss_kib_sd':rs,'prefill_tps':pt,'decode_tps':dt,'score':score,'prefill_cv_pct':100*ps/pm,'decode_cv_pct':100*ds/dm,'rss_cv_pct':100*rs/rm})
+          control_end=[run_one('control-end',*control,r) for r in range(1,reps+1)]
+          def mean(xs,k): return statistics.mean(v[k] for v in xs)
+          drift={'prefill_pct':(mean(control_end,'prefill_ms')/mean(control_start,'prefill_ms')-1)*100,'decode_pct':(mean(control_end,'decode_total_ms')/mean(control_start,'decode_total_ms')-1)*100,'rss_pct':(mean(control_end,'peak_rss_kib')/mean(control_start,'peak_rss_kib')-1)*100}
+          refs={(r['threads'],r['batch']):r for r in rows if r['q8act']==0 and r['bind']=='close'}
+          for r in rows:
+              ref=refs[(r['threads'],r['batch'])]
+              r['score_improvement_pct']=(r['score']/ref['score']-1)*100
+              r['prefill_improvement_pct']=(1-r['prefill_ms_mean']/ref['prefill_ms_mean'])*100
+              r['decode_improvement_pct']=(1-r['decode_ms_mean']/ref['decode_ms_mean'])*100
+              r['rss_increase_pct']=(r['peak_rss_kib_mean']/ref['peak_rss_kib_mean']-1)*100
+              r['screen_pass']=(r['score_improvement_pct']>=5 and r['prefill_cv_pct']<=5 and r['decode_cv_pct']<=5 and r['decode_improvement_pct']>=-2 and r['rss_increase_pct']<=max_rss_inc)
+          rows.sort(key=lambda r:r['score'],reverse=True); passing=[r for r in rows if r['screen_pass']]
+          result={'schema':2,'source_commit':os.environ.get('GITHUB_SHA'),'model_sha256':os.environ['MODEL_SHA256'],'reps':reps,'max_rss_increase_pct':max_rss_inc,'control_drift_pct':drift,'winner':passing[0] if passing else None,'passing_count':len(passing),'rows':rows}
+          (root/'summary.json').write_text(json.dumps(result,indent=2)+'\n')
+          lines=['# Throughput factorial screen — RSS gated','',f'TinyStories 15M Q4_0; 32 configurations; {reps} reps/config; production source unchanged.','',f"Control drift: prefill {drift['prefill_pct']:.2f}%, decode {drift['decode_pct']:.2f}%, RSS {drift['rss_pct']:.2f}%",'', '| Rank | Threads | Batch | Q8 | Bind | Prefill tok/s | Decode tok/s | Peak RSS MiB | Speed delta | RSS delta | Pass |','|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|:---:|']
+          for i,r in enumerate(rows[:12],1): lines.append(f"| {i} | {r['threads']} | {r['batch']} | {r['q8act']} | {r['bind']} | {r['prefill_tps']:.2f} | {r['decode_tps']:.2f} | {r['peak_rss_kib_mean']/1024:.2f} | {r['score_improvement_pct']:.2f}% | {r['rss_increase_pct']:.2f}% | {'YES' if r['screen_pass'] else 'no'} |")
+          lines += ['',f'Passing configurations: **{len(passing)}**.','Promotion gate: >=5% combined speed improvement, <=5% timing CV, decode regression <=2%, and peak RSS increase <=2%.']
+          if passing:
+              w=passing[0]; lines += ['',f"Winner: threads={w['threads']}, batch={w['batch']}, q8act={w['q8act']}, bind={w['bind']}; speed +{w['score_improvement_pct']:.2f}%; RSS {w['rss_increase_pct']:+.2f}%.",'Winner is only a small-model candidate and must pass larger-model same-runner validation.']
+          else: lines += ['','No configuration met both speed and memory gates. Keep current production configuration unchanged.']
+          (root/'SUMMARY.md').write_text('\n'.join(lines)+'\n'); print((root/'SUMMARY.md').read_text())
+          PY
+
+      - name: Verify production source remained untouched
+        run: git diff --exit-code -- src include benchmarks tests CMakeLists.txt
+
+      - name: Record environment
+        run: |
+          { echo "source_commit=$GITHUB_SHA"; echo "screen_schema=$SCREEN_SCHEMA"; echo "model_sha256=$MODEL_SHA256"; echo "max_rss_increase_pct=$MAX_RSS_INCREASE_PCT"; uname -a; lscpu; free -h; } > throughput-factorial-screen/environment.txt
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: memvanta-throughput-factorial-screen-rss
+          path: throughput-factorial-screen/**
+          retention-days: 30
+
+      - name: Publish compact evidence to repository
+        run: |
+          set -euo pipefail
+          mkdir -p results/throughput-factorial-screen
+          cp throughput-factorial-screen/SUMMARY.md results/throughput-factorial-screen/SUMMARY.md
+          cp throughput-factorial-screen/summary.json results/throughput-factorial-screen/summary.json
+          cp throughput-factorial-screen/environment.txt results/throughput-factorial-screen/environment.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/throughput-factorial-screen
+          git commit -m "Publish RSS-gated throughput screen evidence"
+          git pull --rebase origin main
+          git push origin HEAD:main
