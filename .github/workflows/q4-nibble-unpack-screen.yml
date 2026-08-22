@@ -1,0 +1,137 @@
+name: Q4 Nibble Unpack Screen
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/q4-nibble-unpack-screen.yml'
+
+permissions:
+  contents: write
+
+env:
+  MODEL: stories15M-q4_0.gguf
+  MODEL_URL: https://huggingface.co/ggml-org/models-moved/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true
+  MODEL_SHA256: 66967fbece6dbe97886593fdbb73589584927e29119ec31f08090732d1861739
+  REPS: 7
+  MIN_SPEED_GAIN_PCT: 5
+  MAX_RSS_INCREASE_PCT: 2
+
+jobs:
+  q4-nibble-screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build curl time
+
+      - name: Download exact trained model
+        run: |
+          curl -L --fail --retry 3 --retry-delay 2 "$MODEL_URL" -o "$MODEL"
+          echo "$MODEL_SHA256  $MODEL" | sha256sum -c -
+
+      - name: Build baseline and unpack variants
+        run: |
+          set -euo pipefail
+          cp src/gguf_kernels.cpp /tmp/gguf_kernels.baseline.cpp
+          build_variant() {
+            variant="$1"
+            cp /tmp/gguf_kernels.baseline.cpp src/gguf_kernels.cpp
+            if [ "$variant" != "baseline" ]; then
+              python3 - "$variant" <<'PY'
+          import pathlib, sys
+          p=pathlib.Path('src/gguf_kernels.cpp')
+          s=p.read_text()
+          v=sys.argv[1]
+          old_decl='__m256 a0=_mm256_setzero_ps(),a1=_mm256_setzero_ps(),a2=_mm256_setzero_ps(),a3=_mm256_setzero_ps();const __m128i mask=_mm_set1_epi8(0x0f),bias=_mm_set1_epi8(8);'
+          old_loop='for(std::size_t bi=0;bi<nb;++bi){const float d=fp16_to_fp32(w[bi].d);const __m128i packed=_mm_loadu_si128(reinterpret_cast<const __m128i*>(w[bi].qs));const __m128i lo=_mm_sub_epi8(_mm_and_si128(packed,mask),bias),hi=_mm_sub_epi8(_mm_and_si128(_mm_srli_epi16(packed,4),mask),bias);for(int h=0;h<2;++h){const __m128i src=h?hi:lo;for(int k=0;k<16;k+=8){__m256 q=_mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(src,k))),_mm256_set1_ps(d));'
+          if old_decl not in s or old_loop not in s:
+              raise SystemExit('Q4 batch4 source pattern not found')
+          if v=='lut':
+              new_decl='__m256 a0=_mm256_setzero_ps(),a1=_mm256_setzero_ps(),a2=_mm256_setzero_ps(),a3=_mm256_setzero_ps();const __m128i mask=_mm_set1_epi8(0x0f);const __m128i qlut=_mm_setr_epi8(-8,-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7);'
+              new_loop='for(std::size_t bi=0;bi<nb;++bi){const float d=fp16_to_fp32(w[bi].d);const __m128i packed=_mm_loadu_si128(reinterpret_cast<const __m128i*>(w[bi].qs));const __m128i lo=_mm_shuffle_epi8(qlut,_mm_and_si128(packed,mask)),hi=_mm_shuffle_epi8(qlut,_mm_and_si128(_mm_srli_epi16(packed,4),mask));for(int h=0;h<2;++h){const __m128i src=h?hi:lo;for(int k=0;k<16;k+=8){__m256 q=_mm256_mul_ps(_mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128(src,k))),_mm256_set1_ps(d));'
+          elif v=='bias32':
+              new_decl='__m256 a0=_mm256_setzero_ps(),a1=_mm256_setzero_ps(),a2=_mm256_setzero_ps(),a3=_mm256_setzero_ps();const __m128i mask=_mm_set1_epi8(0x0f);const __m256i bias32=_mm256_set1_epi32(8);'
+              new_loop='for(std::size_t bi=0;bi<nb;++bi){const float d=fp16_to_fp32(w[bi].d);const __m128i packed=_mm_loadu_si128(reinterpret_cast<const __m128i*>(w[bi].qs));const __m128i lo=_mm_and_si128(packed,mask),hi=_mm_and_si128(_mm_srli_epi16(packed,4),mask);for(int h=0;h<2;++h){const __m128i src=h?hi:lo;for(int k=0;k<16;k+=8){__m256i qi=_mm256_sub_epi32(_mm256_cvtepu8_epi32(_mm_srli_si128(src,k)),bias32);__m256 q=_mm256_mul_ps(_mm256_cvtepi32_ps(qi),_mm256_set1_ps(d));'
+          else:
+              raise SystemExit('unknown variant')
+          s=s.replace(old_decl,new_decl,1).replace(old_loop,new_loop,1)
+          p.write_text(s)
+          PY
+            fi
+            cmake -S . -B "build-$variant" -G Ninja -DCMAKE_BUILD_TYPE=Release
+            cmake --build "build-$variant" --target memvanta_profile memvanta_tests memvanta_tokenizer_tests -j "$(nproc)"
+            ctest --test-dir "build-$variant" --output-on-failure
+          }
+          build_variant baseline
+          build_variant lut
+          build_variant bias32
+          cp /tmp/gguf_kernels.baseline.cpp src/gguf_kernels.cpp
+          git diff --exit-code -- src/gguf_kernels.cpp
+
+      - name: Run randomized repeated RSS-gated screen
+        run: |
+          set -euo pipefail
+          mkdir -p results/q4-nibble-unpack-screen/raw
+          python3 - <<'PY'
+          import json, os, pathlib, random, re, statistics, subprocess
+          root=pathlib.Path('results/q4-nibble-unpack-screen'); raw=root/'raw'
+          variants=['baseline','lut','bias32']; reps=int(os.environ['REPS'])
+          order=variants*reps; random.Random(20260822).shuffle(order)
+          data={v:[] for v in variants}
+          metric_re=re.compile(r'\b(prefill_ms|decode_total_ms)=([0-9.]+)')
+          rss_re=re.compile(r'Maximum resident set size \(kbytes\):\s*(\d+)')
+          for i,v in enumerate(order,1):
+              env=os.environ.copy(); env.update({'OMP_NUM_THREADS':'4','OMP_DYNAMIC':'FALSE','OMP_PROC_BIND':'close','OMP_PLACES':'cores','MALLOC_ARENA_MAX':'2'})
+              cmd=['/usr/bin/time','-v',f'./build-{v}/memvanta_profile','--model',os.environ['MODEL'],'--threads','4','--ctx','128','--prompt','64','--gen','16','--batch','32','--csv',str(raw/f'{i:02d}-{v}.csv')]
+              p=subprocess.run(cmd,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=180)
+              (raw/f'{i:02d}-{v}.txt').write_text(p.stdout); (raw/f'{i:02d}-{v}.time.txt').write_text(p.stderr)
+              if p.returncode: raise SystemExit(f'{v} failed rc={p.returncode}')
+              m=dict((k,float(x)) for k,x in metric_re.findall(p.stdout)); rr=rss_re.search(p.stderr)
+              if 'prefill_ms' not in m or 'decode_total_ms' not in m or not rr: raise SystemExit(f'missing metrics for {v}')
+              data[v].append((m['prefill_ms'],m['decode_total_ms'],float(rr.group(1))))
+          def agg(v):
+              xs=data[v]; pm=[x[0] for x in xs]; dm=[x[1] for x in xs]; rm=[x[2] for x in xs]
+              return {'prefill_ms':statistics.mean(pm),'decode_ms':statistics.mean(dm),'rss_kib':statistics.mean(rm),
+                      'prefill_cv_pct':100*statistics.stdev(pm)/statistics.mean(pm),
+                      'decode_cv_pct':100*statistics.stdev(dm)/statistics.mean(dm),
+                      'rss_cv_pct':100*statistics.stdev(rm)/statistics.mean(rm)}
+          rows={v:agg(v) for v in variants}; b=rows['baseline']
+          def score(r):
+              pt=64*1000/r['prefill_ms']; dt=16*1000/r['decode_ms']; return 2/(1/pt+1/dt)
+          bs=score(b); passing=[]
+          for v,r in rows.items():
+              r['prefill_tps']=64*1000/r['prefill_ms']; r['decode_tps']=16*1000/r['decode_ms']; r['score']=score(r)
+              r['speed_gain_pct']=(r['score']/bs-1)*100; r['rss_delta_pct']=(r['rss_kib']/b['rss_kib']-1)*100
+              r['pass']=v!='baseline' and r['speed_gain_pct']>=float(os.environ['MIN_SPEED_GAIN_PCT']) and r['rss_delta_pct']<=float(os.environ['MAX_RSS_INCREASE_PCT']) and r['prefill_cv_pct']<=5 and r['decode_cv_pct']<=5
+              if r['pass']: passing.append((r['score'],v))
+          winner=max(passing)[1] if passing else None
+          result={'source_commit':os.environ.get('GITHUB_SHA'),'model_sha256':os.environ['MODEL_SHA256'],'winner':winner,'rows':rows}
+          (root/'summary.json').write_text(json.dumps(result,indent=2)+'\n')
+          lines=['# Q4 nibble unpack screen','',f'Exact TinyStories 15M Q4_0; {reps} randomized reps/variant; production source restored.','',
+                 '| Variant | Prefill tok/s | Decode tok/s | Peak RSS MiB | Combined gain | RSS delta | Prefill CV | Decode CV | Pass |',
+                 '|---|---:|---:|---:|---:|---:|---:|---:|:---:|']
+          for v in variants:
+              r=rows[v]; lines.append(f"| {v} | {r['prefill_tps']:.2f} | {r['decode_tps']:.2f} | {r['rss_kib']/1024:.2f} | {r['speed_gain_pct']:.2f}% | {r['rss_delta_pct']:.2f}% | {r['prefill_cv_pct']:.2f}% | {r['decode_cv_pct']:.2f}% | {'YES' if r['pass'] else 'no'} |")
+          lines += ['',f'Winner: **{winner or "none"}**.','Promotion gate: >=5% combined speed gain, <=2% RSS increase, <=5% timing CV.']
+          (root/'SUMMARY.md').write_text('\n'.join(lines)+'\n'); print((root/'SUMMARY.md').read_text())
+          PY
+
+      - name: Verify production source unchanged
+        run: git diff --exit-code -- src include benchmarks tests CMakeLists.txt
+
+      - name: Publish compact evidence
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add results/q4-nibble-unpack-screen/SUMMARY.md results/q4-nibble-unpack-screen/summary.json
+          git commit -m 'Publish Q4 nibble unpack screen evidence'
+          git push
