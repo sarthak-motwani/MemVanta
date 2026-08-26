@@ -2,7 +2,7 @@
   {
     "build_commit": "6503355",
     "build_number": 1,
-    "cpu_info": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "cpu_info": "AMD EPYC 9V74 80-Core Processor",
     "gpu_info": "",
     "backends": "CPU",
     "model_filename": "openlm-research-open_llama_7b_v2-Q4_0.gguf",
@@ -35,18 +35,18 @@
     "n_prompt": 512,
     "n_gen": 0,
     "n_depth": 0,
-    "test_time": "2026-08-21T09:20:55Z",
-    "avg_ns": 11178523086,
-    "stddev_ns": 234948320,
-    "avg_ts": 45.818260,
-    "stddev_ts": 0.960389,
-    "samples_ns": [ 11285291444, 10879178447, 11154665152, 11505606598, 11067873792 ],
-    "samples_ts": [ 45.3688, 47.0624, 45.9001, 44.5, 46.26 ]
+    "test_time": "2026-08-26T13:44:52Z",
+    "avg_ns": 23720301765,
+    "stddev_ns": 21524182,
+    "avg_ts": 21.584900,
+    "stddev_ts": 0.019587,
+    "samples_ns": [ 23700218511, 23695834604, 23744849023, 23735220758, 23725385933 ],
+    "samples_ts": [ 21.6032, 21.6072, 21.5626, 21.5713, 21.5803 ]
   },
   {
     "build_commit": "6503355",
     "build_number": 1,
-    "cpu_info": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "cpu_info": "AMD EPYC 9V74 80-Core Processor",
     "gpu_info": "",
     "backends": "CPU",
     "model_filename": "openlm-research-open_llama_7b_v2-Q4_0.gguf",
@@ -79,12 +79,12 @@
     "n_prompt": 0,
     "n_gen": 128,
     "n_depth": 0,
-    "test_time": "2026-08-21T09:22:02Z",
-    "avg_ns": 16486519076,
-    "stddev_ns": 189320169,
-    "avg_ts": 7.764731,
-    "stddev_ts": 0.088364,
-    "samples_ns": [ 16798120004, 16465380807, 16414222913, 16469091156, 16285780503 ],
-    "samples_ts": [ 7.6199, 7.77389, 7.79812, 7.77214, 7.85962 ]
+    "test_time": "2026-08-26T13:47:14Z",
+    "avg_ns": 13322239235,
+    "stddev_ns": 44734159,
+    "avg_ts": 9.608081,
+    "stddev_ts": 0.032307,
+    "samples_ns": [ 13372746753, 13329152790, 13256296174, 13349093599, 13303906861 ],
+    "samples_ts": [ 9.57171, 9.60301, 9.65579, 9.58867, 9.62123 ]
   }
 ]
