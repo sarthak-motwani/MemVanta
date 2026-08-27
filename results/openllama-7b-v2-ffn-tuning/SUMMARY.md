@@ -2,15 +2,19 @@
 
 Exact verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg16, F16 KV.
 
-| Mode | Batch | Prefill ms | Decode ms | FFN ms | QKV ms | Total ms |
+| Mode | Batch | Prefill ms | Decode ms | FFN ms | Total ms | Peak RSS KiB |
 |---|---:|---:|---:|---:|---:|---:|
-| fp32 | 16 | 47367.70 | 11423.60 | 36414.47 | 13702.76 | 58791.30 |
-| fp32 | 32 | 48676.40 | 11431.50 | 38015.63 | 13586.55 | 60107.90 |
-| fp32 | 64 | 55024.60 | 11505.80 | 41297.95 | 15944.68 | 66530.40 |
-| q8act | 64 | 136268.00 | 11397.00 | 95901.23 | 35797.31 | 147665.00 |
-| q8act | 32 | 136255.00 | 11479.70 | 95923.43 | 35808.75 | 147734.70 |
-| q8act | 16 | 136435.00 | 11429.30 | 95909.23 | 35863.10 | 147864.30 |
+| fp32 | 32 | 35595.70 | 9801.47 | 27873.26 | 45397.17 | 3810688 |
+| fp32 | 64 | 37800.60 | 9755.24 | 29325.66 | 47555.84 | 3810680 |
+| fp32 | 16 | 38474.00 | 9777.67 | 29391.62 | 48251.67 | 3811040 |
+| q8act | 64 | 115466.00 | 9746.32 | 81094.78 | 125212.32 | 3810988 |
+| q8act | 32 | 115540.00 | 9774.16 | 81117.36 | 125314.16 | 3810664 |
+| q8act | 16 | 115804.00 | 9755.05 | 81238.55 | 125559.05 | 3811052 |
 
-Best measured configuration: **fp32 activation path, batch 16**.
+Best FP32: batch 32; best Q8-act: batch 64.
+Q8-act end-to-end improvement vs best FP32: **-175.82%**.
+Q8-act FFN improvement vs best FP32: **-190.94%**.
+Q8-act peak-RSS delta: **0.01%**.
+Promotion gate (>=3% total, FFN faster, <=2% RSS growth, exact deterministic output): **FAIL**.
 
-This is a tuning experiment, not a llama.cpp comparison claim.
+A failed promotion gate is valid negative evidence; do not enable Q8 activations by default from this workflow alone.
