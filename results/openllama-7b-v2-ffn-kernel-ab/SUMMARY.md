@@ -1,14 +1,17 @@
 # OpenLLaMA 7B FFN kernel repeated same-runner A/B
 
-Exact same runner, exact same verified Q4_0 GGUF, CPU-only, 4 threads, pp128/tg16, batch 32, F16 KV; 3 alternating-order pairs.
+Current baseline vs candidate on the exact same runner and verified Q4_0 GGUF; 3 alternating-order pairs.
+
+Hosted-runner regression tolerance: 2.0% for FFN and end-to-end time; candidates still need positive evidence before promotion.
 
 | Metric | Baseline mean ± SD | Candidate mean ± SD | Improvement |
 |---|---:|---:|---:|
-| FFN GEMM ms | 27999.41 ± 89.30 | 27908.42 ± 211.40 | 0.32% |
-| Prefill ms | 35880.40 ± 71.38 | 35573.77 ± 254.73 | 0.85% |
-| Decode ms | 9766.64 ± 22.89 | 9755.12 ± 15.32 | 0.12% |
-| QKV ms | 10345.02 ± 23.01 | 10297.69 ± 59.39 | 0.46% |
+| FFN GEMM ms | 36733.36 ± 212.50 | 36628.11 ± 143.51 | 0.29% |
+| Prefill ms | 46767.33 ± 351.55 | 46647.90 ± 271.78 | 0.26% |
+| Decode ms | 12800.40 ± 56.75 | 12757.57 ± 26.65 | 0.33% |
+| QKV ms | 13769.63 ± 132.99 | 13756.73 ± 121.79 | 0.09% |
 
-Positive improvement means lower elapsed time for the candidate kernel.
-
-Per-pair FFN improvements: -0.04%, 0.21%, 0.81%
+- Total improvement: 0.27%
+- FFN improvement: 0.29%
+- RSS growth: 0.00%
+- Gate: **PASS**
